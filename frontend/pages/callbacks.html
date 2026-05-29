@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Callbacks</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="callbacks">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Callbacks</span>
+            <h2>Smart callback queue management</h2>
+            <p>Create callbacks manually, review scheduling decisions, and execute or reschedule follow-up calls.</p>
+          </section>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Create Callback</h2>
+                  <p class="panel-subtitle">NLP time parsing and business-hour normalization happen on the backend.</p>
+                </div>
+              </div>
+              <div id="callback-form-message"></div>
+              <form id="callback-form">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label for="lead-name">Lead Name</label>
+                    <input id="lead-name" name="lead_name" type="text" value="Rahul Sharma" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="phone">Phone</label>
+                    <input id="phone" name="phone" type="tel" value="+91" required>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="callback-reason">Reason</label>
+                    <input id="callback-reason" name="callback_reason" type="text" value="Lead requested a callback after lunch" required>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="requested-time-raw">Requested Time</label>
+                    <input id="requested-time-raw" name="requested_time_raw" type="text" value="tomorrow after lunch" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="priority">Priority</label>
+                    <select id="priority" name="priority">
+                      <option value="">Auto-detect</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes">Lead asked to reconnect after lunch and review pricing.</textarea>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button id="create-callback-button" class="button primary" type="submit">Create Callback</button>
+                  <button class="button ghost" type="reset">Reset</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Queue Snapshot</h2>
+                  <p class="panel-subtitle">Live summary of callback workload and scheduling state.</p>
+                </div>
+              </div>
+              <div id="callback-summary-panel" class="loading-state">Loading callback metrics...</div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Callback Dashboard</h2>
+                <p class="panel-subtitle">Search and filter callbacks by status, source, date, and priority.</p>
+              </div>
+              <div class="header-actions">
+                <button id="refresh-callbacks-button" class="button secondary" type="button">Refresh</button>
+              </div>
+            </div>
+
+            <form id="callback-filters" class="filter-bar">
+              <div class="form-field">
+                <label for="callback-search">Search</label>
+                <input id="callback-search" name="search" type="text" placeholder="Lead name, phone, or reason">
+              </div>
+              <div class="form-field">
+                <label for="filter-status">Status</label>
+                <select id="filter-status" name="status">
+                  <option value="">All</option>
+                  <option value="scheduled">Scheduled</option>
+                  <option value="queued">Queued</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="rescheduled">Rescheduled</option>
+                  <option value="missed">Missed</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-priority">Priority</label>
+                <select id="filter-priority" name="priority">
+                  <option value="">All</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-source">Source</label>
+                <select id="filter-source" name="source">
+                  <option value="">All</option>
+                  <option value="manual">Manual</option>
+                  <option value="individual">Individual</option>
+                  <option value="campaign">Campaign</option>
+                  <option value="webhook">Webhook</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-date-from">Date From</label>
+                <input id="filter-date-from" name="date_from" type="date">
+              </div>
+              <div class="form-field">
+                <label for="filter-date-to">Date To</label>
+                <input id="filter-date-to" name="date_to" type="date">
+              </div>
+              <div class="filter-actions">
+                <button class="button secondary" type="submit">Apply</button>
+                <button id="clear-filters-button" class="button ghost" type="button">Clear</button>
+              </div>
+            </form>
+
+            <div id="callback-dashboard-message"></div>
+            <div class="table-shell">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Lead Name</th>
+                    <th>Phone</th>
+                    <th>Requested Time</th>
+                    <th>Priority</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Retry Count</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="callback-table-body">
+                  <tr><td colspan="8">Loading callbacks...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/callbacks.js"></script>
+</body>
+</html>

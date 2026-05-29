@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Summaries</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="summaries">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Summaries</span>
+            <h2>Gemma-powered post-call intelligence</h2>
+            <p>Filter AI-processed calls, inspect detailed reasoning, and export summary data for downstream workflows.</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Summary Dashboard</h2>
+                <p class="panel-subtitle">Search across summaries, filter by outcome or sentiment, and inspect call intelligence in detail.</p>
+              </div>
+              <div class="header-actions">
+                <button id="refresh-summaries-button" class="button secondary" type="button">Refresh</button>
+                <button id="export-summaries-button" class="button secondary" type="button">Export JSON</button>
+              </div>
+            </div>
+
+            <form id="summary-filters" class="filter-bar">
+              <div class="form-field">
+                <label for="summary-search">Search</label>
+                <input id="summary-search" name="search" type="text" placeholder="Lead, summary, next action">
+              </div>
+              <div class="form-field">
+                <label for="filter-date-from">Date From</label>
+                <input id="filter-date-from" name="date_from" type="date">
+              </div>
+              <div class="form-field">
+                <label for="filter-date-to">Date To</label>
+                <input id="filter-date-to" name="date_to" type="date">
+              </div>
+              <div class="form-field">
+                <label for="filter-campaign-id">Campaign</label>
+                <select id="filter-campaign-id" name="campaign_id">
+                  <option value="">All</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-lead-type">Lead Type</label>
+                <select id="filter-lead-type" name="lead_type">
+                  <option value="">All</option>
+                  <option value="hot">Hot</option>
+                  <option value="warm">Warm</option>
+                  <option value="cold">Cold</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-outcome">Outcome</label>
+                <select id="filter-outcome" name="outcome">
+                  <option value="">All</option>
+                  <option value="successful">Successful</option>
+                  <option value="interested">Interested</option>
+                  <option value="callback">Callback</option>
+                  <option value="meeting_requested">Meeting Requested</option>
+                  <option value="not_interested">Not Interested</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="filter-sentiment">Sentiment</label>
+                <select id="filter-sentiment" name="sentiment">
+                  <option value="">All</option>
+                  <option value="positive">Positive</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="negative">Negative</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </div>
+              <div class="filter-actions">
+                <button class="button secondary" type="submit">Apply</button>
+                <button id="clear-summary-filters-button" class="button ghost" type="button">Clear</button>
+              </div>
+            </form>
+
+            <div id="summaries-message"></div>
+            <div class="table-shell">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Lead Name</th>
+                    <th>Summary</th>
+                    <th>Sentiment</th>
+                    <th>Lead Type</th>
+                    <th>Outcome</th>
+                    <th>AI Score</th>
+                    <th>Next Action</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="summaries-table-body">
+                  <tr><td colspan="8">Loading summaries...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/summaries.js"></script>
+</body>
+</html>

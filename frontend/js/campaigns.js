@@ -1,0 +1,489 @@
+import { bootPage } from "./app.js";
+import { pageTitles, frontendConfig } from "./config.js";
+import { confirmDialog, showContentDialog } from "./components/modal.js";
+import { emptyState, errorState, loadingState } from "./components/loading.js";
+import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
+import { campaignService } from "./services/campaignService.js";
+import { callService } from "./services/callService.js";
+import {
+  escapeHtml,
+  formatDateTime,
+  formatPercent,
+  formatStatusLabel,
+  toLocalDateTimeInputValue,
+} from "./utils/formatter.js";
+import { collectFormValues, normalizeOptionalString, requireFields } from "./utils/validation.js";
+import { showError, showSuccess } from "./utils/notifications.js";
+
+const form = document.getElementById("campaign-form");
+const formMessage = document.getElementById("campaign-form-message");
+const agentSelect = document.getElementById("agent-id");
+const csvFileInput = document.getElementById("csv-file");
+const previewPanel = document.getElementById("csv-preview-panel");
+const createButton = document.getElementById("create-campaign-button");
+const scheduleTypeSelect = document.getElementById("schedule-type");
+const scheduledAtWrapper = document.getElementById("scheduled-at-wrapper");
+const scheduledAtInput = document.getElementById("scheduled-at");
+const filtersForm = document.getElementById("campaign-filters");
+const clearFiltersButton = document.getElementById("clear-campaign-filters-button");
+const tableBody = document.getElementById("campaign-table-body");
+const refreshButton = document.getElementById("refresh-campaigns-button");
+const dashboardMessage = document.getElementById("campaign-dashboard-message");
+
+let previewContacts = [];
+let allCampaigns = [];
+let activeSearch = "";
+let activeStatus = "";
+
+function getFilterValue(fieldName) {
+  const field = filtersForm.elements.namedItem(fieldName);
+  if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
+    return field.value || "";
+  }
+  return "";
+}
+
+function renderMessage(target, type, message) {
+  target.innerHTML = `<div class="alert ${type}">${escapeHtml(message)}</div>`;
+}
+
+function clearMessage(target) {
+  target.innerHTML = "";
+}
+
+function setCreateLoadingState(isLoading) {
+  createButton.disabled = isLoading;
+  createButton.textContent = isLoading ? "Creating Campaign..." : "Create Campaign";
+}
+
+function toggleScheduledField() {
+  const isScheduled = scheduleTypeSelect.value === "scheduled";
+  scheduledAtWrapper.classList.toggle("hidden", !isScheduled);
+  scheduledAtInput.required = isScheduled;
+}
+
+function resetPreview() {
+  previewContacts = [];
+  previewPanel.innerHTML = emptyState("Upload a CSV to preview valid, invalid, and duplicate rows.");
+}
+
+function buildPreviewMarkup(preview) {
+  const rows = preview.preview_rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.row_number}</td>
+          <td>${escapeHtml(row.name || "-")}</td>
+          <td>${escapeHtml(row.normalized_phone || row.phone || "-")}</td>
+          <td>${escapeHtml(row.company || "-")}</td>
+          <td>${escapeHtml(row.city || "-")}</td>
+          <td>${escapeHtml(row.role || "-")}</td>
+          <td>${escapeHtml(row.interest || "-")}</td>
+          <td><span class="status-pill ${escapeHtml(row.validation_status)}">${escapeHtml(row.validation_status)}</span></td>
+          <td>${escapeHtml(row.validation_message)}</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  return `
+    <div class="card-grid">
+      <div class="stat-card"><span class="stat-label">Valid Contacts</span><span class="stat-value">${preview.valid_contacts}</span></div>
+      <div class="stat-card"><span class="stat-label">Invalid Contacts</span><span class="stat-value">${preview.invalid_contacts}</span></div>
+      <div class="stat-card"><span class="stat-label">Duplicate Contacts</span><span class="stat-value">${preview.duplicate_contacts}</span></div>
+    </div>
+    <div class="table-shell compact">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Company</th>
+            <th>City</th>
+            <th>Role</th>
+            <th>Interest</th>
+            <th>Status</th>
+            <th>Validation</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function buildCampaignActions(campaign) {
+  const buttons = [];
+
+  if (["scheduled", "failed"].includes(campaign.status)) {
+    buttons.push(`<button class="button secondary small" type="button" data-action="start" data-campaign-id="${campaign.campaign_id}">Start</button>`);
+  }
+  if (campaign.status === "running") {
+    buttons.push(`<button class="button secondary small" type="button" data-action="pause" data-campaign-id="${campaign.campaign_id}">Pause</button>`);
+    buttons.push(`<button class="button ghost small" type="button" data-action="stop" data-campaign-id="${campaign.campaign_id}">Stop</button>`);
+  }
+  if (campaign.status === "paused") {
+    buttons.push(`<button class="button secondary small" type="button" data-action="resume" data-campaign-id="${campaign.campaign_id}">Resume</button>`);
+    buttons.push(`<button class="button ghost small" type="button" data-action="stop" data-campaign-id="${campaign.campaign_id}">Stop</button>`);
+  }
+
+  buttons.push(`<button class="button ghost small" type="button" data-action="details" data-campaign-id="${campaign.campaign_id}">View Details</button>`);
+
+  if (campaign.status !== "running") {
+    buttons.push(`<button class="button ghost small danger-outline" type="button" data-action="delete" data-campaign-id="${campaign.campaign_id}">Delete</button>`);
+  }
+
+  return buttons.join("");
+}
+
+function applyFilters(campaigns) {
+  return campaigns.filter((campaign) => {
+    if (activeStatus && campaign.status !== activeStatus) {
+      return false;
+    }
+
+    if (!activeSearch) {
+      return true;
+    }
+
+    const haystack = [
+      campaign.campaign_name,
+      campaign.campaign_type,
+      campaign.call_objective,
+      campaign.agent_name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(activeSearch);
+  });
+}
+
+function renderCampaignRows(campaigns) {
+  if (!campaigns.length) {
+    renderTableEmpty(tableBody, 7, "No campaigns matched the current filters.");
+    return;
+  }
+
+  tableBody.innerHTML = campaigns
+    .map(
+      (campaign) => `
+        <tr>
+          <td>
+            <div class="table-title">
+              <strong>${escapeHtml(campaign.campaign_name)}</strong>
+              <span class="table-subtext">${escapeHtml(campaign.campaign_type)}</span>
+            </div>
+          </td>
+          <td><span class="status-pill ${escapeHtml(campaign.status)}">${escapeHtml(campaign.status)}</span></td>
+          <td>
+            <div>${campaign.completed_calls}/${campaign.total_contacts} completed</div>
+            <div class="table-subtext">Pending: ${campaign.pending_calls} | Active: ${campaign.active_calls} | Retry: ${campaign.retry_calls}</div>
+          </td>
+          <td>${campaign.total_contacts}</td>
+          <td>${formatPercent(campaign.success_rate)}</td>
+          <td>${escapeHtml(formatDateTime(campaign.created_at))}</td>
+          <td><div class="table-actions">${buildCampaignActions(campaign)}</div></td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+async function loadAgents() {
+  agentSelect.innerHTML = "<option>Loading agents...</option>";
+
+  try {
+    const agents = await callService.listAgents();
+    if (!agents.length) {
+      agentSelect.innerHTML = "<option value=''>No agents configured</option>";
+      renderMessage(formMessage, "info", "No Deepgram agents are available.");
+      return;
+    }
+
+    agentSelect.innerHTML = agents
+      .map(
+        (agent) => `
+          <option value="${escapeHtml(agent.agent_id)}">
+            ${escapeHtml(agent.agent_name)} - ${escapeHtml(agent.purpose)}
+          </option>
+        `,
+      )
+      .join("");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load agents.";
+    renderMessage(formMessage, "error", message);
+    agentSelect.innerHTML = "<option value=''>Unable to load agents</option>";
+  }
+}
+
+async function previewCsv(file) {
+  if (!file) {
+    resetPreview();
+    return;
+  }
+
+  previewPanel.innerHTML = loadingState("Validating CSV upload...");
+
+  try {
+    const preview = await campaignService.previewCsv(file);
+    previewContacts = preview.contacts;
+    previewPanel.innerHTML = buildPreviewMarkup(preview);
+    renderMessage(
+      formMessage,
+      "success",
+      `${preview.valid_contacts} contacts are ready. ${preview.invalid_contacts} invalid and ${preview.duplicate_contacts} duplicate rows were detected.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "CSV preview failed.";
+    previewContacts = [];
+    previewPanel.innerHTML = errorState(message);
+    renderMessage(formMessage, "error", message);
+  }
+}
+
+function collectCampaignPayload() {
+  const payload = collectFormValues(form);
+  requireFields(payload, {
+    campaign_name: "Campaign Name",
+    agent_id: "Deepgram Agent",
+    campaign_type: "Campaign Type",
+    call_objective: "Call Objective",
+    language: "Language",
+  });
+
+  if (!previewContacts.length) {
+    throw new Error("Upload and validate a CSV file before creating the campaign.");
+  }
+
+  payload.contacts = previewContacts;
+  payload.notes = normalizeOptionalString(payload.notes);
+  if (payload.schedule_type === "scheduled") {
+    if (!payload.scheduled_at) {
+      throw new Error("Please select a scheduled date and time.");
+    }
+    payload.scheduled_at = new Date(payload.scheduled_at).toISOString();
+  } else {
+    delete payload.scheduled_at;
+  }
+  return payload;
+}
+
+async function loadCampaigns() {
+  renderTableLoading(tableBody, 7, "Loading campaigns...");
+
+  try {
+    allCampaigns = await campaignService.listCampaigns();
+    renderCampaignRows(applyFilters(allCampaigns));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load campaigns.";
+    renderTableError(tableBody, 7, message);
+  }
+}
+
+async function openCampaignDetails(campaignId) {
+  try {
+    const [campaign, contacts] = await Promise.all([
+      campaignService.getCampaign(campaignId),
+      campaignService.getCampaignContacts(campaignId),
+    ]);
+
+    const contactsMarkup = contacts.length
+      ? `
+        <div class="table-shell compact">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Retry Count</th>
+                <th>Call SID</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${contacts
+                .map(
+                  (contact) => `
+                    <tr>
+                      <td>${escapeHtml(contact.name)}</td>
+                      <td>${escapeHtml(contact.phone)}</td>
+                      <td><span class="status-pill ${escapeHtml(contact.status)}">${escapeHtml(formatStatusLabel(contact.status))}</span></td>
+                      <td>${contact.retry_count}</td>
+                      <td>${escapeHtml(contact.call_sid || "-")}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : emptyState("No contacts were stored for this campaign.");
+
+    showContentDialog({
+      title: `${campaign.campaign_name} details`,
+      bodyHtml: `
+        <div class="card-grid">
+          <div class="stat-card"><span class="stat-label">Contacts</span><span class="stat-value">${campaign.total_contacts}</span></div>
+          <div class="stat-card"><span class="stat-label">Completed</span><span class="stat-value">${campaign.completed_calls}</span></div>
+          <div class="stat-card"><span class="stat-label">Answered</span><span class="stat-value">${campaign.answered_calls}</span></div>
+          <div class="stat-card"><span class="stat-label">Success Rate</span><span class="stat-value">${formatPercent(campaign.success_rate)}</span></div>
+        </div>
+        <div class="key-value-grid" style="margin-top: 1rem;">
+          <div><strong>Agent:</strong> ${escapeHtml(campaign.agent_name)}</div>
+          <div><strong>Status:</strong> ${escapeHtml(campaign.status)}</div>
+          <div><strong>Objective:</strong> ${escapeHtml(campaign.call_objective)}</div>
+          <div><strong>Scheduled:</strong> ${escapeHtml(formatDateTime(campaign.scheduled_at))}</div>
+          <div><strong>Notes:</strong> ${escapeHtml(campaign.notes || "No notes")}</div>
+          <div><strong>Priority:</strong> ${escapeHtml(campaign.priority)}</div>
+        </div>
+        <h3 style="margin-top: 1.25rem;">Contacts</h3>
+        ${contactsMarkup}
+      `,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load campaign details.";
+    renderMessage(dashboardMessage, "error", message);
+    showError(message);
+  }
+}
+
+async function handleCampaignAction(action, campaignId) {
+  clearMessage(dashboardMessage);
+
+  try {
+    if (action === "details") {
+      await openCampaignDetails(campaignId);
+      return;
+    }
+
+    if (action === "delete") {
+      const confirmed = await confirmDialog({
+        title: "Delete campaign",
+        message: "This will remove the campaign and its stored contact queue. Continue?",
+        confirmLabel: "Delete campaign",
+        confirmVariant: "danger",
+      });
+      if (!confirmed) {
+        return;
+      }
+      await campaignService.deleteCampaign(campaignId);
+      renderMessage(dashboardMessage, "success", "Campaign deleted successfully.");
+      showSuccess("Campaign deleted.");
+    } else if (action === "stop") {
+      const confirmed = await confirmDialog({
+        title: "Stop campaign",
+        message: "This will halt any further dispatching for the campaign. Continue?",
+        confirmLabel: "Stop campaign",
+      });
+      if (!confirmed) {
+        return;
+      }
+      await campaignService.stopCampaign(campaignId);
+      renderMessage(dashboardMessage, "success", "Campaign stopped successfully.");
+      showSuccess("Campaign stopped.");
+    } else if (action === "start") {
+      await campaignService.startCampaign(campaignId);
+      renderMessage(dashboardMessage, "success", "Campaign started successfully.");
+      showSuccess("Campaign started.");
+    } else if (action === "pause") {
+      await campaignService.pauseCampaign(campaignId);
+      renderMessage(dashboardMessage, "success", "Campaign paused successfully.");
+      showSuccess("Campaign paused.");
+    } else if (action === "resume") {
+      await campaignService.resumeCampaign(campaignId);
+      renderMessage(dashboardMessage, "success", "Campaign resumed successfully.");
+      showSuccess("Campaign resumed.");
+    }
+
+    await loadCampaigns();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Campaign action failed.";
+    renderMessage(dashboardMessage, "error", message);
+    showError(message);
+  }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearMessage(formMessage);
+  setCreateLoadingState(true);
+
+  try {
+    const payload = collectCampaignPayload();
+    const campaign = await campaignService.createCampaign(payload);
+    renderMessage(formMessage, "success", `Campaign ${campaign.campaign_name} was created successfully.`);
+    showSuccess(`Campaign ${campaign.campaign_name} created.`);
+    form.reset();
+    scheduledAtInput.value = toLocalDateTimeInputValue();
+    toggleScheduledField();
+    resetPreview();
+    await loadCampaigns();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to create the campaign.";
+    renderMessage(formMessage, "error", message);
+    showError(message);
+  } finally {
+    setCreateLoadingState(false);
+  }
+});
+
+form.addEventListener("reset", () => {
+  clearMessage(formMessage);
+  window.setTimeout(() => {
+    scheduledAtInput.value = toLocalDateTimeInputValue();
+    toggleScheduledField();
+  }, 0);
+  resetPreview();
+});
+
+csvFileInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  await previewCsv(file);
+});
+
+scheduleTypeSelect.addEventListener("change", toggleScheduledField);
+
+filtersForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  activeSearch = String(getFilterValue("search")).trim().toLowerCase();
+  activeStatus = String(getFilterValue("status"));
+  renderCampaignRows(applyFilters(allCampaigns));
+});
+
+clearFiltersButton.addEventListener("click", () => {
+  filtersForm.reset();
+  activeSearch = "";
+  activeStatus = "";
+  renderCampaignRows(applyFilters(allCampaigns));
+});
+
+tableBody.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
+
+  await handleCampaignAction(button.dataset.action, button.dataset.campaignId);
+});
+
+refreshButton.addEventListener("click", async () => {
+  await loadCampaigns();
+  showSuccess("Campaign list refreshed.");
+});
+
+bootPage({
+  pageKey: "campaigns",
+  title: pageTitles.campaigns,
+  subtitle: "Create, validate, launch, and control bulk outbound calling campaigns.",
+});
+
+scheduledAtInput.value = toLocalDateTimeInputValue();
+toggleScheduledField();
+resetPreview();
+loadAgents();
+loadCampaigns();
+window.setInterval(loadCampaigns, frontendConfig.refreshIntervals.campaignsMs);

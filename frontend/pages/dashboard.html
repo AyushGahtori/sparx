@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Dashboard</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="dashboard">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Overview</span>
+            <h2>Platform activity and operational health</h2>
+            <p>Track calling volume, campaigns, callback workload, and AI output from one admin dashboard.</p>
+          </section>
+
+          <section id="dashboard-kpis" class="card-grid">
+            <div class="stat-card"><span class="stat-label">Total Calls</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Campaign Calls</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Manual Calls</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Callbacks Pending</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Meetings Requested</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Hot Leads</span><span class="stat-value">-</span></div>
+          </section>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Recent Calls</h2>
+                  <p class="panel-subtitle">Latest call records from Firestore.</p>
+                </div>
+                <div class="header-actions">
+                  <button id="refresh-dashboard-button" class="button secondary" type="button">Refresh</button>
+                </div>
+              </div>
+              <div class="table-shell">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Lead Name</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                      <th>Lead Type</th>
+                      <th>Outcome</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recent-calls-body">
+                    <tr><td colspan="5">Loading calls...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div class="section-stack">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Campaign Status</h2>
+                    <p class="panel-subtitle">Current campaign progress snapshot.</p>
+                  </div>
+                </div>
+                <div id="campaign-status-widget" class="loading-state">Loading campaigns...</div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Callback Queue</h2>
+                    <p class="panel-subtitle">Upcoming and active callback workload.</p>
+                  </div>
+                </div>
+                <div id="callback-queue-widget" class="loading-state">Loading callbacks...</div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Quick Actions</h2>
+                    <p class="panel-subtitle">Jump directly into the most common workflows.</p>
+                  </div>
+                </div>
+                <div class="quick-actions">
+                  <a class="quick-action" href="./manual-call.html">
+                    <strong>Start Manual Call</strong>
+                    <span>Launch a single outbound AI call.</span>
+                  </a>
+                  <a class="quick-action" href="./campaigns.html">
+                    <strong>Create Campaign</strong>
+                    <span>Upload leads and start a bulk run.</span>
+                  </a>
+                  <a class="quick-action" href="./callbacks.html">
+                    <strong>View Callbacks</strong>
+                    <span>Manage scheduled follow-up calls.</span>
+                  </a>
+                  <a class="quick-action" href="./summaries.html">
+                    <strong>View Summaries</strong>
+                    <span>Inspect Gemma post-call intelligence.</span>
+                  </a>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/dashboard.js"></script>
+</body>
+</html>

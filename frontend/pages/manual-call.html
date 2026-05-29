@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Manual AI Call</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="manual-call">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Manual Call</span>
+            <h2>Start an individual AI outbound call</h2>
+            <p>Enter the lead profile, select a Deepgram agent, and let SPARX trigger Twilio and track the call lifecycle.</p>
+          </section>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Lead Details</h2>
+                  <p class="panel-subtitle">All required fields map directly to the Phase 2 call API.</p>
+                </div>
+              </div>
+              <div id="form-message"></div>
+              <form id="manual-call-form">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label for="lead-name">Lead Name</label>
+                    <input id="lead-name" name="lead_name" type="text" value="Rahul Sharma" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="phone">Phone Number</label>
+                    <input id="phone" name="phone" type="tel" value="+91" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="company">Company</label>
+                    <input id="company" name="company" type="text" value="ABC Tech">
+                  </div>
+                  <div class="form-field">
+                    <label for="city">City</label>
+                    <input id="city" name="city" type="text" value="Delhi">
+                  </div>
+                  <div class="form-field">
+                    <label for="role">Role</label>
+                    <input id="role" name="role" type="text" value="Manager">
+                  </div>
+                  <div class="form-field">
+                    <label for="interest">Interest</label>
+                    <input id="interest" name="interest" type="text" value="AI Automation">
+                  </div>
+                  <div class="form-field">
+                    <label for="agent-id">Select Deepgram Agent</label>
+                    <select id="agent-id" name="agent_id" required></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="language">Language Preference</label>
+                    <input id="language" name="language" type="text" value="English + Hindi" required>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="call-objective">Call Objective</label>
+                    <input id="call-objective" name="call_objective" type="text" value="Discuss SPARX AI calling solution" required>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="additional-context">Additional Context / Notes</label>
+                    <textarea id="additional-context" name="additional_context">Recently visited pricing page</textarea>
+                  </div>
+                  <div class="form-field">
+                    <label for="priority">Priority</label>
+                    <select id="priority" name="priority" required>
+                      <option value="high" selected>High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-actions">
+                  <button id="submit-button" class="button primary" type="submit">Start AI Call</button>
+                  <button class="button ghost" type="reset">Reset</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Call Status</h2>
+                  <p class="panel-subtitle">Live status refreshes until the call and AI processing reach a final state.</p>
+                </div>
+              </div>
+              <div id="call-status-panel" class="empty-state">No call has been started yet.</div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/manual-call.js"></script>
+</body>
+</html>

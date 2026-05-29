@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Campaigns</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="campaigns">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Campaigns</span>
+            <h2>Bulk AI outbound campaign management</h2>
+            <p>Validate CSV leads, create campaigns, watch progress, and control queue execution without leaving the dashboard.</p>
+          </section>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Create Campaign</h2>
+                  <p class="panel-subtitle">Upload CSV contacts and launch an immediate or scheduled campaign.</p>
+                </div>
+              </div>
+              <div id="campaign-form-message"></div>
+              <form id="campaign-form">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label for="campaign-name">Campaign Name</label>
+                    <input id="campaign-name" name="campaign_name" type="text" value="Q2 Sales Campaign" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="agent-id">Select Deepgram Agent</label>
+                    <select id="agent-id" name="agent_id" required></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="campaign-type">Campaign Type</label>
+                    <input id="campaign-type" name="campaign_type" type="text" value="Lead Qualification" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="language">Language</label>
+                    <input id="language" name="language" type="text" value="English + Hindi" required>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="call-objective">Call Objective</label>
+                    <input id="call-objective" name="call_objective" type="text" value="Introduce SPARX and qualify interest" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="priority">Priority</label>
+                    <select id="priority" name="priority" required>
+                      <option value="high" selected>High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label for="schedule-type">Schedule Type</label>
+                    <select id="schedule-type" name="schedule_type" required>
+                      <option value="immediate" selected>Immediate</option>
+                      <option value="scheduled">Scheduled</option>
+                    </select>
+                  </div>
+                  <div id="scheduled-at-wrapper" class="form-field full-width hidden">
+                    <label for="scheduled-at">Scheduled Date & Time</label>
+                    <input id="scheduled-at" name="scheduled_at" type="datetime-local">
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="csv-file">CSV Upload</label>
+                    <input id="csv-file" name="csv_file" type="file" accept=".csv,text/csv" required>
+                    <span class="field-help">Required columns: <code>name</code> and <code>phone</code>. Optional: <code>company</code>, <code>city</code>, <code>role</code>, <code>interest</code>.</span>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes">High-priority prospects</textarea>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button id="create-campaign-button" class="button primary" type="submit">Create Campaign</button>
+                  <button class="button ghost" type="reset">Reset</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>CSV Preview</h2>
+                  <p class="panel-subtitle">Validation runs before campaign creation.</p>
+                </div>
+              </div>
+              <div id="csv-preview-panel" class="empty-state">Upload a CSV to preview valid, invalid, and duplicate rows.</div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Campaign Dashboard</h2>
+                <p class="panel-subtitle">Search, filter, and control current campaigns.</p>
+              </div>
+              <div class="header-actions">
+                <button id="refresh-campaigns-button" class="button secondary" type="button">Refresh</button>
+              </div>
+            </div>
+
+            <form id="campaign-filters" class="filter-bar">
+              <div class="form-field">
+                <label for="campaign-search">Search</label>
+                <input id="campaign-search" name="search" type="text" placeholder="Campaign name or objective">
+              </div>
+              <div class="form-field">
+                <label for="campaign-status-filter">Status</label>
+                <select id="campaign-status-filter" name="status">
+                  <option value="">All</option>
+                  <option value="scheduled">Scheduled</option>
+                  <option value="running">Running</option>
+                  <option value="paused">Paused</option>
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div class="filter-actions">
+                <button class="button secondary" type="submit">Apply</button>
+                <button id="clear-campaign-filters-button" class="button ghost" type="button">Clear</button>
+              </div>
+            </form>
+
+            <div id="campaign-dashboard-message"></div>
+            <div class="table-shell">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Campaign Name</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Contacts</th>
+                    <th>Success Rate</th>
+                    <th>Created Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="campaign-table-body">
+                  <tr><td colspan="7">Loading campaigns...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/campaigns.js"></script>
+</body>
+</html>

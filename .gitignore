@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+backend/.env
+backend/logs/*.log
+backend/logs/*.out
+backend/logs/*.err
+frontend/*.log
+frontend/*.out
+frontend/*.err
+*.log
+*.egg-info/
+.DS_Store
+Thumbs.db
+
+# Local binaries and tunnels
+ngrok.exe
+
+# Secrets and credentials
+*.pem
+*.key
+*firebase-adminsdk*.json
+serviceAccount*.json
+service-account*.json

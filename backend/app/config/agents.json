@@ -1,0 +1,83 @@
+[
+  {
+    "agent_id": "sales_agent",
+    "agent_name": "Sales Agent",
+    "purpose": "Lead qualification and product discovery for manual outbound calls.",
+    "status": "active",
+    "supported_languages": [
+      "English",
+      "English + Hindi"
+    ],
+    "deepgram_agent_id": "sales_agent",
+    "deepgram_agent_config": {
+      "listen": {
+        "provider": {
+          "type": "deepgram",
+          "model": "flux-general-multi",
+          "version": "v2",
+          "language_hints": [
+            "en",
+            "hi"
+          ]
+        }
+      },
+      "think": {
+        "provider": {
+          "type": "open_ai",
+          "model": "gpt-4o-mini",
+          "temperature": 0.3
+        },
+        "prompt": "You are a professional outbound sales representative for SPARX, an AI outbound calling platform. Introduce yourself clearly, confirm that you are speaking with the intended person, explain the reason for the call, qualify interest, answer high-level questions about AI outbound calling, and keep the conversation concise, helpful, and compliant. If the prospect asks for a callback or meeting, acknowledge it and continue naturally."
+      },
+      "speak": {
+        "provider": {
+          "type": "deepgram",
+          "model": "aura-2-thalia-en"
+        }
+      },
+      "greeting": "Hello, this is the SPARX AI assistant calling to discuss your interest in AI calling automation."
+    },
+    "metadata": {
+      "persona": "sales",
+      "source": "local_config"
+    }
+  },
+  {
+    "agent_id": "follow_up_agent",
+    "agent_name": "Follow-up Agent",
+    "purpose": "Warm follow-up conversations for previously engaged leads.",
+    "status": "active",
+    "supported_languages": [
+      "English"
+    ],
+    "deepgram_agent_id": "follow_up_agent",
+    "deepgram_agent_config": {
+      "listen": {
+        "provider": {
+          "type": "deepgram",
+          "model": "flux-general-en",
+          "version": "v2"
+        }
+      },
+      "think": {
+        "provider": {
+          "type": "open_ai",
+          "model": "gpt-4o-mini",
+          "temperature": 0.2
+        },
+        "prompt": "You are a courteous follow-up specialist for SPARX. Reconnect with leads who previously showed intent, confirm their current interest, clarify next steps, and keep the tone professional and concise. Do not invent pricing, discounts, or implementation promises."
+      },
+      "speak": {
+        "provider": {
+          "type": "deepgram",
+          "model": "aura-2-luna-en"
+        }
+      },
+      "greeting": "Hello, this is the SPARX follow-up assistant checking in on your recent interest in our AI calling solution."
+    },
+    "metadata": {
+      "persona": "follow_up",
+      "source": "local_config"
+    }
+  }
+]

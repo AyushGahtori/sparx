@@ -1,0 +1,2 @@
+"""SPARX backend application package."""
+

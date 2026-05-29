@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARX Diagnostics</title>
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+</head>
+<body data-page="settings">
+  <div class="app-shell">
+    <aside id="sidebar-root"></aside>
+    <div class="app-main">
+      <header id="navbar-root"></header>
+      <main class="page-content">
+        <div class="page-grid">
+          <section class="panel page-intro">
+            <span class="eyebrow">Diagnostics</span>
+            <h2>System health and operator tools</h2>
+            <p>Monitor runtime dependencies, queue health, and local operator shortcuts from one place while the backend remains environment-driven.</p>
+          </section>
+
+          <div class="page-grid equal">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Runtime Health</h2>
+                  <p class="panel-subtitle">Live infrastructure and queue diagnostics.</p>
+                </div>
+              </div>
+              <div id="settings-health" class="loading-state">Loading health...</div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Operator Links</h2>
+                  <p class="panel-subtitle">Useful local entry points and recovery shortcuts.</p>
+                </div>
+              </div>
+              <div class="widget-list">
+                <a class="widget-item" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
+                  <div class="widget-item-title">FastAPI Docs</div>
+                  <div class="detail-text">Inspect and test all backend endpoints.</div>
+                </a>
+                <a class="widget-item" href="./dashboard.html">
+                  <div class="widget-item-title">Return to Dashboard</div>
+                  <div class="detail-text">Go back to live KPIs and activity widgets.</div>
+                </a>
+                <a class="widget-item" href="./call-history.html">
+                  <div class="widget-item-title">Review Call History</div>
+                  <div class="detail-text">Audit stored calls and retry from the manual flow.</div>
+                </a>
+                <a class="widget-item" href="./callbacks.html">
+                  <div class="widget-item-title">Inspect Callback Queue</div>
+                  <div class="detail-text">Check scheduled retries, reschedules, and callback execution status.</div>
+                </a>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script type="module" src="../js/settings.js"></script>
+</body>
+</html>
