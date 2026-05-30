@@ -88,9 +88,11 @@ def test_build_agent_payload_appends_history_context_without_mutating_source_con
     assert history_message["type"] == "History"
     assert history_message["role"] == "user"
     assert "Avery Stone" in history_message["content"]
+    assert "+14155550123" in history_message["content"]
     assert "Q2 Enterprise Outreach" in history_message["content"]
     assert "Voice AI" in history_message["content"]
     assert "schedule_call_action" in agent_payload["think"]["prompt"]
+    assert "do not ask the customer for their number" in agent_payload["think"]["prompt"]
     assert any(
         function.get("name") == "schedule_call_action"
         for function in agent_payload["think"]["functions"]
@@ -185,6 +187,8 @@ async def test_function_call_request_executes_schedule_call_action_with_call_def
                     "arguments": json.dumps(
                         {
                             "type": "executive_callback",
+                            "name": "Wrong Name",
+                            "phone": "+19999999999",
                             "scheduled_time": "2026-06-15T14:30:00",
                             "requested_time_raw": "today at 2:30 PM",
                         }

@@ -36,11 +36,17 @@ SCHEDULE_CALL_FUNCTION_DEFINITION = {
             },
             "name": {
                 "type": "string",
-                "description": "Customer name. The backend will use the current call lead name if omitted.",
+                "description": (
+                    "Optional customer name. In a live outbound call, do not ask for this; "
+                    "the backend uses the current call lead name."
+                ),
             },
             "phone": {
                 "type": "string",
-                "description": "Customer phone number. The backend will use the current call phone if omitted.",
+                "description": (
+                    "Optional customer phone. In a live outbound call, do not ask for this; "
+                    "the backend uses the phone number currently being called."
+                ),
             },
             "scheduled_time": {
                 "type": "string",

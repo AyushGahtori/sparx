@@ -429,10 +429,8 @@ class MediaBridgeService:
             arguments = self._parse_function_arguments(function_call.get("arguments"))
             call_record = await self.call_service.get_call(call_id)
             enriched_arguments = dict(arguments)
-            if not enriched_arguments.get("name"):
-                enriched_arguments["name"] = call_record.lead_name
-            if not enriched_arguments.get("phone"):
-                enriched_arguments["phone"] = call_record.phone
+            enriched_arguments["name"] = call_record.lead_name
+            enriched_arguments["phone"] = call_record.phone
             if not enriched_arguments.get("timezone"):
                 enriched_arguments["timezone"] = self.schedule_call_action.settings.callback_default_timezone
             action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
@@ -515,6 +513,7 @@ class MediaBridgeService:
         call_brief_lines = [
             "Call context for the outbound conversation.",
             f"Lead Name: {call_record.lead_name}",
+            f"Lead Phone Number: {call_record.phone}",
             f"Company: {call_record.company or 'Not provided'}",
             f"City: {call_record.city or 'Not provided'}",
             f"Role: {call_record.role or 'Not provided'}",
@@ -558,7 +557,10 @@ class MediaBridgeService:
                 "with a real person, collect a clear date and time if needed. After the customer confirms "
                 f"the time, call {ScheduleCallAction.name}. Use ai_callback for automated AI callbacks "
                 "and executive_callback for human executive or sales-team requests. Do not rely on a "
-                "spoken promise alone for scheduling."
+                "spoken promise alone for scheduling. You already know the current call's phone number "
+                "from the call context, so do not ask the customer for their number. Instead, confirm "
+                "the existing number naturally, for example: 'Is this number okay for our executive to "
+                "call at 3:30 PM?'"
             ).strip()
 
         context = agent_payload.setdefault("context", {})
