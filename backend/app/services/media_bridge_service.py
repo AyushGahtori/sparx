@@ -9,11 +9,18 @@ from functools import lru_cache
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect as websocket_connect
 
+from app.actions.schedule_call_action import (
+    SCHEDULE_CALL_FUNCTION_DEFINITION,
+    ScheduleCallAction,
+    get_schedule_call_action,
+)
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.integrations.deepgram import DeepgramService, get_deepgram_service
 from app.schemas.call import CallResponse
+from app.schemas.scheduled_call import ScheduleCallActionRequest
 from app.services.call_service import CallService, get_call_service
+from app.utils.time import utc_now_iso
 
 logger = get_logger(__name__)
 
@@ -32,9 +39,15 @@ class MediaBridgeService:
     audio_buffer_size_bytes = 10 * 160
     keepalive_interval_seconds = 5
 
-    def __init__(self, deepgram_service: DeepgramService, call_service: CallService) -> None:
+    def __init__(
+        self,
+        deepgram_service: DeepgramService,
+        call_service: CallService,
+        schedule_call_action: ScheduleCallAction,
+    ) -> None:
         self.deepgram_service = deepgram_service
         self.call_service = call_service
+        self.schedule_call_action = schedule_call_action
 
     async def bridge_call(self, twilio_websocket: WebSocket) -> None:
         await twilio_websocket.accept()
@@ -233,6 +246,7 @@ class MediaBridgeService:
             payload = json.loads(message)
             await self._handle_deepgram_text_event(
                 payload=payload,
+                deepgram_websocket=deepgram_websocket,
                 twilio_websocket=twilio_websocket,
                 state=state,
                 call_id=call_id,
@@ -310,6 +324,7 @@ class MediaBridgeService:
 
             await self._handle_deepgram_text_event(
                 payload=payload,
+                deepgram_websocket=deepgram_websocket,
                 twilio_websocket=twilio_websocket,
                 state=state,
                 call_id=call_id,
@@ -320,6 +335,7 @@ class MediaBridgeService:
         self,
         *,
         payload: dict[str, object],
+        deepgram_websocket,
         twilio_websocket: WebSocket,
         state: MediaSessionState,
         call_id: str,
@@ -334,6 +350,14 @@ class MediaBridgeService:
                 event_type="conversation_text",
                 message="Deepgram emitted conversation text.",
                 payload=payload,
+            )
+            return
+
+        if message_type == "FunctionCallRequest":
+            await self._handle_function_call_request(
+                payload=payload,
+                deepgram_websocket=deepgram_websocket,
+                call_id=call_id,
             )
             return
 
@@ -355,6 +379,126 @@ class MediaBridgeService:
                     message=self._extract_deepgram_error_message(payload),
                     details={"response": payload},
                 )
+
+    async def _handle_function_call_request(
+        self,
+        *,
+        payload: dict[str, object],
+        deepgram_websocket,
+        call_id: str,
+    ) -> None:
+        functions = payload.get("functions")
+        if not isinstance(functions, list):
+            await self.call_service.append_event(
+                call_id,
+                event_type="function_call_error",
+                message="Deepgram function call request did not include a functions array.",
+                payload=payload,
+            )
+            return
+
+        for function_call in functions:
+            if not isinstance(function_call, dict):
+                continue
+            response = await self._execute_function_call(function_call=function_call, call_id=call_id)
+            await deepgram_websocket.send(json.dumps(response, default=str))
+
+    async def _execute_function_call(
+        self,
+        *,
+        function_call: dict[str, object],
+        call_id: str,
+    ) -> dict[str, object]:
+        function_name = str(function_call.get("name") or "")
+        function_id = str(function_call.get("id") or "")
+
+        if function_name != ScheduleCallAction.name:
+            content = {
+                "error": "unsupported_function",
+                "message": f"Function '{function_name}' is not available in SPARX.",
+            }
+            await self.call_service.append_event(
+                call_id,
+                event_type="function_call_unsupported",
+                message=f"Deepgram requested unsupported function '{function_name}'.",
+                payload={"function_id": function_id, "function_name": function_name},
+            )
+            return self._build_function_response(function_id=function_id, function_name=function_name, content=content)
+
+        try:
+            arguments = self._parse_function_arguments(function_call.get("arguments"))
+            call_record = await self.call_service.get_call(call_id)
+            enriched_arguments = dict(arguments)
+            if not enriched_arguments.get("name"):
+                enriched_arguments["name"] = call_record.lead_name
+            if not enriched_arguments.get("phone"):
+                enriched_arguments["phone"] = call_record.phone
+            if not enriched_arguments.get("timezone"):
+                enriched_arguments["timezone"] = self.schedule_call_action.settings.callback_default_timezone
+            action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
+            result = await self.schedule_call_action.execute(action_payload)
+            content = result.model_dump(mode="json")
+            await self.call_service.append_event(
+                call_id,
+                event_type="schedule_call_action_completed",
+                message="The voice agent created a scheduled call through schedule_call_action.",
+                payload={
+                    "function_id": function_id,
+                    "scheduled_call_id": result.scheduled_call_id,
+                    "type": result.type,
+                    "scheduled_time": result.scheduled_time.isoformat(),
+                },
+            )
+            return self._build_function_response(
+                function_id=function_id,
+                function_name=function_name,
+                content=content,
+            )
+        except Exception as exc:
+            content = {
+                "error": "schedule_call_action_failed",
+                "message": str(exc),
+            }
+            await self.call_service.append_event(
+                call_id,
+                event_type="schedule_call_action_failed",
+                message="The voice agent could not create a scheduled call through schedule_call_action.",
+                payload={
+                    "function_id": function_id,
+                    "error": str(exc),
+                },
+            )
+            return self._build_function_response(
+                function_id=function_id,
+                function_name=function_name,
+                content=content,
+            )
+
+    @staticmethod
+    def _parse_function_arguments(arguments: object) -> dict[str, object]:
+        if arguments is None:
+            return {}
+        if isinstance(arguments, dict):
+            return arguments
+        if isinstance(arguments, str):
+            parsed = json.loads(arguments or "{}")
+            if isinstance(parsed, dict):
+                return parsed
+        raise ValueError("Function arguments must be a JSON object.")
+
+    @staticmethod
+    def _build_function_response(
+        *,
+        function_id: str,
+        function_name: str,
+        content: dict[str, object],
+    ) -> dict[str, object]:
+        return {
+            "type": "FunctionCallResponse",
+            "id": function_id,
+            "name": function_name,
+            "content": json.dumps(content, default=str),
+        }
 
     @staticmethod
     def _extract_deepgram_error_message(payload: dict[str, object]) -> str:
@@ -379,6 +523,7 @@ class MediaBridgeService:
             f"Language Preference: {call_record.language}",
             f"Priority: {call_record.priority}",
             f"Additional Context: {call_record.additional_context or 'None'}",
+            f"Current System Time: {utc_now_iso()}",
         ]
 
         if campaign_context:
@@ -400,6 +545,22 @@ class MediaBridgeService:
             return call_record.deepgram_agent_id or call_record.agent_id
 
         agent_payload = deepcopy(agent_configuration)
+        think = agent_payload.setdefault("think", {})
+        functions = think.setdefault("functions", [])
+        if not any(function.get("name") == ScheduleCallAction.name for function in functions if isinstance(function, dict)):
+            functions.append(deepcopy(SCHEDULE_CALL_FUNCTION_DEFINITION))
+
+        prompt = str(think.get("prompt") or "")
+        if ScheduleCallAction.name not in prompt:
+            think["prompt"] = (
+                f"{prompt}\n\n"
+                "When a customer asks for a callback, says this is not a good time, or requests to speak "
+                "with a real person, collect a clear date and time if needed. After the customer confirms "
+                f"the time, call {ScheduleCallAction.name}. Use ai_callback for automated AI callbacks "
+                "and executive_callback for human executive or sales-team requests. Do not rely on a "
+                "spoken promise alone for scheduling."
+            ).strip()
+
         context = agent_payload.setdefault("context", {})
         messages = context.setdefault("messages", [])
         messages.append({"type": "History", "role": "user", "content": call_brief})
@@ -411,4 +572,5 @@ def get_media_bridge_service() -> MediaBridgeService:
     return MediaBridgeService(
         deepgram_service=get_deepgram_service(),
         call_service=get_call_service(),
+        schedule_call_action=get_schedule_call_action(),
     )

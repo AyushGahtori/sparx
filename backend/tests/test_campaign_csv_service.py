@@ -9,12 +9,12 @@ from app.services.campaign_csv_service import CampaignCsvService
 
 
 def build_service(**overrides) -> CampaignCsvService:
-    settings = Settings(
-        _env_file=None,
-        CAMPAIGN_CSV_MAX_FILE_SIZE_BYTES=2048,
-        CAMPAIGN_CSV_MAX_ROWS=10,
+    settings_values = {
+        "CAMPAIGN_CSV_MAX_FILE_SIZE_BYTES": 2048,
+        "CAMPAIGN_CSV_MAX_ROWS": 10,
         **overrides,
-    )
+    }
+    settings = Settings(_env_file=None, **settings_values)
     return CampaignCsvService(settings)
 
 
@@ -37,10 +37,10 @@ async def test_campaign_csv_preview_marks_duplicate_rows():
 
 @pytest.mark.asyncio
 async def test_campaign_csv_preview_rejects_oversized_files():
-    service = build_service(CAMPAIGN_CSV_MAX_FILE_SIZE_BYTES=32)
+    service = build_service(CAMPAIGN_CSV_MAX_FILE_SIZE_BYTES=1024)
     upload = UploadFile(
         filename="contacts.csv",
-        file=BytesIO(b"name,phone\nRahul,+919999999999\nPriya,+918888888888\n"),
+        file=BytesIO(b"name,phone\nRahul,+919999999999\n" + (b"A" * 1200)),
     )
 
     with pytest.raises(AppError) as exc_info:

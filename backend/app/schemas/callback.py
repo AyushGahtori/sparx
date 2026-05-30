@@ -17,7 +17,7 @@ CallbackStatus = Literal[
     "rescheduled",
     "missed",
 ]
-CallbackSource = Literal["individual", "campaign", "webhook", "manual"]
+CallbackSource = Literal["individual", "campaign", "webhook", "manual", "action"]
 CallbackConfidence = Literal["high", "medium", "low"]
 
 

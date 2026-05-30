@@ -164,6 +164,10 @@ class CallbackTimeService:
             return cleaned_text.replace("morning", "10:00 am"), "medium"
         if re.fullmatch(r"(next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)", cleaned_text):
             return f"{cleaned_text} 11:00 am", "medium"
+        if cleaned_text == "5 pm" and base_local.hour >= 17:
+            return "tomorrow 5:00 pm", "medium"
+        if self.explicit_time_pattern.fullmatch(cleaned_text):
+            return f"today {cleaned_text}", confidence
 
         if "morning" in cleaned_text and not self.explicit_time_pattern.search(cleaned_text):
             prepared = cleaned_text.replace("morning", "10:00 am")
@@ -176,10 +180,6 @@ class CallbackTimeService:
             confidence = "medium"
         elif "night" in cleaned_text and not self.explicit_time_pattern.search(cleaned_text):
             prepared = cleaned_text.replace("night", "8:00 pm")
-            confidence = "medium"
-
-        if prepared == "5 pm" and base_local.hour >= 17:
-            prepared = "tomorrow 5:00 pm"
             confidence = "medium"
 
         return prepared, confidence

@@ -198,7 +198,7 @@ class CallbackDocument(FirestoreDocument):
     next_retry_time: datetime | None = None
     requested_time_confidence: Literal["high", "medium", "low"] = "medium"
     adjustment_reason: str | None = None
-    source: Literal["individual", "campaign", "webhook", "manual"]
+    source: Literal["individual", "campaign", "webhook", "manual", "action"]
     last_attempted_at: datetime | None = None
     completed_at: datetime | None = None
     last_call_id: str | None = None
@@ -218,6 +218,32 @@ class MeetingDocument(FirestoreDocument):
     status: Literal["pending", "confirmed", "completed", "canceled"] = "pending"
     calendar_provider: Literal["google", "outlook", "manual"] = "manual"
     external_meeting_id: str | None = None
+
+
+class ScheduledCallDocument(FirestoreDocument):
+    scheduled_call_id: str
+    type: Literal["ai_callback", "executive_callback"]
+    name: str
+    phone: str
+    scheduled_time: datetime
+    timezone: str = "Asia/Kolkata"
+    status: Literal[
+        "scheduled",
+        "queued",
+        "in_progress",
+        "completed",
+        "failed",
+        "cancelled",
+        "rescheduled",
+        "missed",
+    ] = "scheduled"
+    callback_id: str | None = None
+    call_id: str | None = None
+    assigned_executive: str | None = None
+    requested_time_raw: str | None = None
+    notes: str | None = None
+    source: Literal["schedule_call_action"] = "schedule_call_action"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentDocument(FirestoreDocument):
