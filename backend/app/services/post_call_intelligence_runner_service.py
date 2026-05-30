@@ -125,12 +125,14 @@ class PostCallIntelligenceRunnerService:
 
     async def _dispatch_queued_calls(self) -> None:
         try:
-            calls = await run_in_threadpool(self.call_repository.list_calls)
+            queued_calls = await run_in_threadpool(
+                self.call_repository.list_calls,
+                ai_processing_status="queued",
+            )
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
             raise
-        queued_calls = [call for call in calls if call.ai_processing_status == "queued"]
         queued_calls.sort(key=lambda call: call.ended_at or call.created_at)
 
         available_slots = max(self.settings.ai_max_parallel_jobs - len(self._active_tasks), 0)
@@ -188,18 +190,20 @@ class PostCallIntelligenceRunnerService:
             raise
 
     async def _recover_incomplete_jobs(self) -> None:
-        calls = await run_in_threadpool(self.call_repository.list_calls)
+        calls = await run_in_threadpool(
+            self.call_repository.list_calls,
+            ai_processing_status="processing",
+        )
         for call_document in calls:
-            if call_document.ai_processing_status == "processing":
-                await run_in_threadpool(
-                    self.call_repository.update_call,
-                    call_document.call_id,
-                    {
-                        "ai_processing_status": "queued",
-                        "ai_error": "Recovered after application restart.",
-                    },
-                )
-                self._recovered_jobs += 1
+            await run_in_threadpool(
+                self.call_repository.update_call,
+                call_document.call_id,
+                {
+                    "ai_processing_status": "queued",
+                    "ai_error": "Recovered after application restart.",
+                },
+            )
+            self._recovered_jobs += 1
 
     def get_diagnostics(self) -> dict[str, object]:
         status = "healthy" if self._loop_task and not self._loop_task.done() and self._last_error is None else "degraded"
