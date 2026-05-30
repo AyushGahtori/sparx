@@ -2,7 +2,7 @@ import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
 import { confirmDialog } from "./components/modal.js";
 import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
-import { scheduledCallService } from "./services/scheduledCallService.js";
+import { scheduledCallService } from "./services/scheduledCallService.js?v=operator-complete";
 import { escapeHtml, formatStatusLabel } from "./utils/formatter.js";
 import { showError, showSuccess } from "./utils/notifications.js";
 

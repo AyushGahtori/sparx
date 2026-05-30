@@ -1,7 +1,7 @@
 import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
 import { confirmDialog } from "./components/modal.js";
-import { callService } from "./services/callService.js";
+import { callService } from "./services/callService.js?v=operator-complete";
 import { getSearchParam } from "./router.js";
 import {
   escapeHtml,

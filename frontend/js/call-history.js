@@ -2,7 +2,7 @@ import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
 import { confirmDialog, showContentDialog } from "./components/modal.js";
 import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
-import { callService } from "./services/callService.js";
+import { callService } from "./services/callService.js?v=operator-complete";
 import { campaignService } from "./services/campaignService.js";
 import { navigateTo } from "./router.js";
 import {
