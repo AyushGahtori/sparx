@@ -58,6 +58,33 @@
   margin-top: 1.25rem;
 }
 
+.schedule-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 0.85rem;
+}
+
+.checkbox-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 500;
+}
+
+.checkbox-grid input {
+  width: auto;
+}
+
 .filter-bar {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -81,7 +108,9 @@
 @media (max-width: 1024px) {
   .form-grid,
   .form-grid.compact,
-  .filter-bar {
+  .filter-bar,
+  .schedule-policy-grid,
+  .checkbox-grid {
     grid-template-columns: 1fr;
   }
 

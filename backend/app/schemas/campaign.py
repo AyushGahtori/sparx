@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -87,6 +87,9 @@ class CampaignCreateRequest(BaseModel):
     schedule_type: CampaignScheduleType
     scheduled_at: datetime | None = None
     notes: str | None = Field(default=None, max_length=8000)
+    ai_callback_max_date: date | None = None
+    executive_callback_max_date: date | None = None
+    executive_callback_allowed_weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     contacts: list[CampaignContactInput] = Field(default_factory=list, min_length=1)
 
     @field_validator("*", mode="before")
@@ -103,6 +106,16 @@ class CampaignCreateRequest(BaseModel):
                 raise ValueError("scheduled_at must be in the future for scheduled campaigns.")
         if not self.contacts:
             raise ValueError("At least one valid contact is required to create a campaign.")
+        today = utc_now().date()
+        if self.ai_callback_max_date and self.ai_callback_max_date < today:
+            raise ValueError("AI callback maximum date cannot be in the past.")
+        if self.executive_callback_max_date and self.executive_callback_max_date < today:
+            raise ValueError("Executive callback maximum date cannot be in the past.")
+        if not self.executive_callback_allowed_weekdays:
+            raise ValueError("At least one executive callback working day is required.")
+        for weekday in self.executive_callback_allowed_weekdays:
+            if weekday < 0 or weekday > 6:
+                raise ValueError("Executive callback working days must be numbers from 0 Monday through 6 Sunday.")
         return self
 
 

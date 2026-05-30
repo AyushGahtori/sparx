@@ -80,6 +80,11 @@ class CampaignService:
             metadata={
                 "agent_source": agent.metadata.get("source", "local_config"),
                 "agent_metadata": agent.metadata,
+                "scheduling_policy": self._build_scheduling_policy(
+                    ai_callback_max_date=payload.ai_callback_max_date,
+                    executive_callback_max_date=payload.executive_callback_max_date,
+                    executive_callback_allowed_weekdays=payload.executive_callback_allowed_weekdays,
+                ),
             },
         )
 
@@ -193,6 +198,23 @@ class CampaignService:
                 code="deepgram_not_configured",
                 message="Deepgram configuration is required before campaign calling can start.",
             )
+
+    @staticmethod
+    def _build_scheduling_policy(
+        *,
+        ai_callback_max_date,
+        executive_callback_max_date,
+        executive_callback_allowed_weekdays: list[int],
+    ) -> dict[str, object]:
+        return {
+            "ai_callback": {
+                "max_scheduled_date": ai_callback_max_date.isoformat() if ai_callback_max_date else None,
+            },
+            "executive_callback": {
+                "max_scheduled_date": executive_callback_max_date.isoformat() if executive_callback_max_date else None,
+                "allowed_weekdays": executive_callback_allowed_weekdays,
+            },
+        }
 
     @staticmethod
     def _to_response(campaign_document: CampaignDocument) -> CampaignResponse:

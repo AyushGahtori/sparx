@@ -40,6 +40,7 @@ class ScheduleCallActionRequest(BaseModel):
     call_type: ScheduledCallOrigin | None = None
     campaign_id: str | None = Field(default=None, max_length=120)
     contact_id: str | None = Field(default=None, max_length=120)
+    scheduling_policy: dict[str, object] | None = None
 
     @field_validator("*", mode="before")
     @classmethod

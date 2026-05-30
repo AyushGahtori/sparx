@@ -27,6 +27,8 @@ const createButton = document.getElementById("create-campaign-button");
 const scheduleTypeSelect = document.getElementById("schedule-type");
 const scheduledAtWrapper = document.getElementById("scheduled-at-wrapper");
 const scheduledAtInput = document.getElementById("scheduled-at");
+const aiCallbackMaxDateInput = document.getElementById("ai-callback-max-date");
+const executiveCallbackMaxDateInput = document.getElementById("executive-callback-max-date");
 const filtersForm = document.getElementById("campaign-filters");
 const clearFiltersButton = document.getElementById("clear-campaign-filters-button");
 const tableBody = document.getElementById("campaign-table-body");
@@ -71,6 +73,30 @@ function toggleScheduledField() {
   const isScheduled = scheduleTypeSelect.value === "scheduled";
   scheduledAtWrapper.classList.toggle("hidden", !isScheduled);
   scheduledAtInput.required = isScheduled;
+}
+
+function toDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateDaysFromNow(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return toDateInputValue(date);
+}
+
+function setSchedulingDateDefaults() {
+  const today = toDateInputValue(new Date());
+  const defaultMaxDate = dateDaysFromNow(30);
+  [aiCallbackMaxDateInput, executiveCallbackMaxDateInput].forEach((input) => {
+    input.min = today;
+    if (!input.value) {
+      input.value = defaultMaxDate;
+    }
+  });
 }
 
 function resetPreview() {
@@ -345,6 +371,10 @@ async function previewCsv(file) {
 
 function collectCampaignPayload() {
   const payload = collectFormValues(form);
+  const formData = new FormData(form);
+  payload.executive_callback_allowed_weekdays = formData
+    .getAll("executive_callback_allowed_weekdays")
+    .map((weekday) => Number(weekday));
   requireFields(payload, {
     campaign_name: "Campaign Name",
     agent_id: "Deepgram Agent",
@@ -355,6 +385,9 @@ function collectCampaignPayload() {
 
   if (!previewContacts.length) {
     throw new Error("Upload and validate a CSV file before creating the campaign.");
+  }
+  if (!payload.executive_callback_allowed_weekdays.length) {
+    throw new Error("Select at least one executive working day.");
   }
 
   payload.contacts = previewContacts;
@@ -537,6 +570,7 @@ form.addEventListener("submit", async (event) => {
     showSuccess(`Campaign ${campaign.campaign_name} created.`);
     form.reset();
     scheduledAtInput.value = toLocalDateTimeInputValue();
+    setSchedulingDateDefaults();
     toggleScheduledField();
     resetPreview();
     applySelectedAgentPrompt({ force: true });
@@ -554,6 +588,7 @@ form.addEventListener("reset", () => {
   clearMessage(formMessage);
   window.setTimeout(() => {
     scheduledAtInput.value = toLocalDateTimeInputValue();
+    setSchedulingDateDefaults();
     toggleScheduledField();
     applySelectedAgentPrompt({ force: true });
   }, 0);
@@ -626,6 +661,7 @@ bootPage({
 });
 
 scheduledAtInput.value = toLocalDateTimeInputValue();
+setSchedulingDateDefaults();
 toggleScheduledField();
 resetPreview();
 loadAgents();

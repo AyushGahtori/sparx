@@ -131,6 +131,7 @@ class CallbackService:
             updated_at=created_at,
             notes=payload.notes,
             metadata={
+                **deepcopy(payload.metadata),
                 "parser_strategy": time_resolution.parser_strategy,
                 "agent_source": agent_configuration.metadata.get("source", "local_config"),
             },

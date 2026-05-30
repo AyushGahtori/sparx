@@ -93,6 +93,8 @@ def test_build_agent_payload_appends_history_context_without_mutating_source_con
     assert "Voice AI" in history_message["content"]
     assert "schedule_call_action" in agent_payload["think"]["prompt"]
     assert "do not ask the customer for their number" in agent_payload["think"]["prompt"]
+    assert "outside the scheduling limits" in agent_payload["think"]["prompt"]
+    assert "Scheduling Limits:" in history_message["content"]
     assert "Campaign-specific instructions from the operator dashboard" in agent_payload["think"]["prompt"]
     assert "Prior webinar attendees." in agent_payload["think"]["prompt"]
     assert any(
@@ -218,3 +220,57 @@ async def test_function_call_request_executes_schedule_call_action_with_call_def
     assert response["name"] == "schedule_call_action"
     assert json.loads(response["content"])["scheduled_call_id"] == "scheduled_call_test"
     assert call_service.events[0]["event_type"] == "schedule_call_action_completed"
+
+
+@pytest.mark.asyncio
+async def test_function_call_request_rejects_executive_callback_outside_working_days():
+    call_response = build_call_response(
+        metadata={
+            "agent_configuration": None,
+            "scheduling_policy": {
+                "ai_callback": {"max_scheduled_date": "2026-06-30"},
+                "executive_callback": {
+                    "max_scheduled_date": "2026-06-30",
+                    "allowed_weekdays": [0, 1, 2, 3, 4],
+                },
+            },
+        }
+    )
+    call_service = FakeCallService(call_response)
+    schedule_action = FakeScheduleCallAction()
+    deepgram_websocket = FakeDeepgramWebSocket()
+    service = MediaBridgeService(
+        deepgram_service=SimpleNamespace(),
+        call_service=call_service,
+        schedule_call_action=schedule_action,
+    )
+
+    await service._handle_deepgram_text_event(
+        payload={
+            "type": "FunctionCallRequest",
+            "functions": [
+                {
+                    "id": "func_bad_day",
+                    "name": "schedule_call_action",
+                    "arguments": json.dumps(
+                        {
+                            "type": "executive_callback",
+                            "scheduled_time": "2026-06-14T14:30:00",
+                            "timezone": "Asia/Kolkata",
+                        }
+                    ),
+                }
+            ],
+        },
+        deepgram_websocket=deepgram_websocket,
+        twilio_websocket=SimpleNamespace(),
+        state=MediaSessionState(),
+        call_id="call_123",
+    )
+
+    assert schedule_action.payloads == []
+    response = deepgram_websocket.sent[0]
+    content = json.loads(response["content"])
+    assert content["error"] == "schedule_call_action_failed"
+    assert "outside the allowed working days" in content["message"]
+    assert call_service.events[0]["event_type"] == "schedule_call_action_failed"

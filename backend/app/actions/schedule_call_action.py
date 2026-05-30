@@ -126,6 +126,7 @@ class ScheduleCallAction:
                 "origin_call_id": payload.call_id,
                 "campaign_id": payload.campaign_id,
                 "contact_id": payload.contact_id,
+                "scheduling_policy": payload.scheduling_policy,
             },
         )
         created_call = await run_in_threadpool(
@@ -155,6 +156,7 @@ class ScheduleCallAction:
                 source=payload.call_type or "action",
                 timezone=scheduled_call.timezone,
                 notes=payload.notes,
+                metadata={"scheduling_policy": payload.scheduling_policy} if payload.scheduling_policy else {},
             )
         )
         callback_document = await run_in_threadpool(

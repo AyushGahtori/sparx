@@ -109,7 +109,14 @@ class CallService:
             deepgram_agent_id=agent.deepgram_agent_id or agent.agent_id,
             created_at=created_at,
             updated_at=created_at,
-            metadata=self._build_agent_metadata(agent),
+            metadata={
+                **self._build_agent_metadata(agent),
+                "scheduling_policy": self._build_scheduling_policy(
+                    ai_callback_max_date=payload.ai_callback_max_date,
+                    executive_callback_max_date=payload.executive_callback_max_date,
+                    executive_callback_allowed_weekdays=payload.executive_callback_allowed_weekdays,
+                ),
+            },
         )
 
         await self._persist_call_record(call_document, message="Manual outbound call record created.")
@@ -168,6 +175,7 @@ class CallService:
             updated_at=created_at,
             metadata={
                 **self._build_agent_metadata(agent),
+                "scheduling_policy": deepcopy(campaign.metadata.get("scheduling_policy", {})),
                 "campaign_context": {
                     "campaign_id": campaign.campaign_id,
                     "campaign_name": campaign.campaign_name,
@@ -250,6 +258,11 @@ class CallService:
                 **(
                     {"campaign_context": deepcopy(callback_document.metadata.get("campaign_context", {}))}
                     if callback_document.metadata.get("campaign_context")
+                    else {}
+                ),
+                **(
+                    {"scheduling_policy": deepcopy(callback_document.metadata.get("scheduling_policy", {}))}
+                    if callback_document.metadata.get("scheduling_policy")
                     else {}
                 ),
             },
@@ -517,6 +530,23 @@ class CallService:
             "agent_configuration": agent.deepgram_agent_config,
             "agent_source": agent.metadata.get("source", "local_config"),
             "agent_metadata": agent.metadata,
+        }
+
+    @staticmethod
+    def _build_scheduling_policy(
+        *,
+        ai_callback_max_date,
+        executive_callback_max_date,
+        executive_callback_allowed_weekdays: list[int],
+    ) -> dict[str, object]:
+        return {
+            "ai_callback": {
+                "max_scheduled_date": ai_callback_max_date.isoformat() if ai_callback_max_date else None,
+            },
+            "executive_callback": {
+                "max_scheduled_date": executive_callback_max_date.isoformat() if executive_callback_max_date else None,
+                "allowed_weekdays": executive_callback_allowed_weekdays,
+            },
         }
 
     @staticmethod

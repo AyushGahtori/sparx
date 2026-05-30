@@ -81,6 +81,36 @@
                       <option value="low">Low</option>
                     </select>
                   </div>
+                  <div class="form-field full-width">
+                    <label>Manual AI Callback Limit</label>
+                    <div class="schedule-policy-grid">
+                      <div class="form-field">
+                        <label for="ai-callback-max-date">Maximum Callback Date</label>
+                        <input id="ai-callback-max-date" name="ai_callback_max_date" type="date">
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-field full-width">
+                    <label>Manual Executive Call Request Limits</label>
+                    <div class="schedule-policy-grid">
+                      <div class="form-field">
+                        <label for="executive-callback-max-date">Maximum Executive Callback Date</label>
+                        <input id="executive-callback-max-date" name="executive_callback_max_date" type="date">
+                      </div>
+                      <div class="form-field">
+                        <label>Executive Working Days</label>
+                        <div class="checkbox-grid">
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="0" checked> Monday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="1" checked> Tuesday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="2" checked> Wednesday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="3" checked> Thursday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="4" checked> Friday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="5"> Saturday</label>
+                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="6"> Sunday</label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="form-actions">
@@ -163,6 +193,6 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/manual-call.js?v=manual-schedules"></script>
+  <script type="module" src="../js/manual-call.js?v=scheduling-limits"></script>
 </body>
 </html>

@@ -46,6 +46,7 @@ class CallbackCreateRequest(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     role: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=200)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("*", mode="before")
     @classmethod

@@ -18,6 +18,8 @@ const formMessage = document.getElementById("form-message");
 const statusPanel = document.getElementById("call-status-panel");
 const submitButton = document.getElementById("submit-button");
 const agentSelect = document.getElementById("agent-id");
+const aiCallbackMaxDateInput = document.getElementById("ai-callback-max-date");
+const executiveCallbackMaxDateInput = document.getElementById("executive-callback-max-date");
 const manualAiCallbackTableBody = document.getElementById("manual-ai-callback-table-body");
 const manualExecutiveRequestTableBody = document.getElementById("manual-executive-request-table-body");
 const manualAiCallbackCount = document.getElementById("manual-ai-callback-count");
@@ -38,6 +40,30 @@ function clearMessage() {
 function setLoadingState(isLoading) {
   submitButton.disabled = isLoading;
   submitButton.textContent = isLoading ? "Starting AI Call..." : "Start AI Call";
+}
+
+function toDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateDaysFromNow(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return toDateInputValue(date);
+}
+
+function setSchedulingDateDefaults() {
+  const today = toDateInputValue(new Date());
+  const defaultMaxDate = dateDaysFromNow(30);
+  [aiCallbackMaxDateInput, executiveCallbackMaxDateInput].forEach((input) => {
+    input.min = today;
+    if (!input.value) {
+      input.value = defaultMaxDate;
+    }
+  });
 }
 
 function isManualSchedule(item) {
@@ -240,6 +266,9 @@ function validatePayload(payload) {
   if (!validatePhoneE164(payload.phone)) {
     throw new Error("Phone number must be in E.164 format, for example +919999999999.");
   }
+  if (!payload.executive_callback_allowed_weekdays.length) {
+    throw new Error("Select at least one executive working day.");
+  }
 }
 
 async function loadAgents() {
@@ -314,6 +343,10 @@ form.addEventListener("submit", async (event) => {
 
   try {
     const payload = collectFormValues(form);
+    const formData = new FormData(form);
+    payload.executive_callback_allowed_weekdays = formData
+      .getAll("executive_callback_allowed_weekdays")
+      .map((weekday) => Number(weekday));
     validatePayload(payload);
     const call = await callService.startIndividualCall(payload);
     activeCallId = call.call_id;
@@ -337,6 +370,7 @@ form.addEventListener("reset", () => {
   stopPolling();
   activeCallId = null;
   statusPanel.innerHTML = `<div class="empty-state">No call has been started yet.</div>`;
+  window.setTimeout(setSchedulingDateDefaults, 0);
 });
 
 statusPanel.addEventListener("click", async (event) => {
@@ -384,6 +418,7 @@ bootPage({
 });
 
 applyPrefillFromQuery();
+setSchedulingDateDefaults();
 loadAgents();
 loadManualSchedules();
 window.setInterval(loadManualSchedules, frontendConfig.refreshIntervals.scheduledCallsMs);

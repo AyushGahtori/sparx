@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,6 +11,7 @@ from app.schemas.intelligence import (
     TranscriptEntryResponse,
 )
 from app.utils.phone import normalize_phone_number
+from app.utils.time import utc_now
 
 
 CallStatus = Literal[
@@ -41,6 +42,9 @@ class IndividualCallRequest(BaseModel):
     additional_context: str | None = Field(default=None, max_length=1000)
     language: str = Field(min_length=2, max_length=120)
     priority: Literal["low", "medium", "high"]
+    ai_callback_max_date: date | None = None
+    executive_callback_max_date: date | None = None
+    executive_callback_allowed_weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
 
     @field_validator("*", mode="before")
     @classmethod
@@ -67,6 +71,16 @@ class IndividualCallRequest(BaseModel):
         missing_fields = [name for name, value in required_fields.items() if not value]
         if missing_fields:
             raise ValueError(f"Missing required fields: {', '.join(missing_fields)}.")
+        today = utc_now().date()
+        if self.ai_callback_max_date and self.ai_callback_max_date < today:
+            raise ValueError("AI callback maximum date cannot be in the past.")
+        if self.executive_callback_max_date and self.executive_callback_max_date < today:
+            raise ValueError("Executive callback maximum date cannot be in the past.")
+        if not self.executive_callback_allowed_weekdays:
+            raise ValueError("At least one executive callback working day is required.")
+        for weekday in self.executive_callback_allowed_weekdays:
+            if weekday < 0 or weekday > 6:
+                raise ValueError("Executive callback working days must be numbers from 0 Monday through 6 Sunday.")
         return self
 
 

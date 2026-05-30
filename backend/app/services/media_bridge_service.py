@@ -4,7 +4,9 @@ import contextlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import date
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect as websocket_connect
@@ -437,7 +439,9 @@ class MediaBridgeService:
             enriched_arguments["contact_id"] = call_record.contact_id
             if not enriched_arguments.get("timezone"):
                 enriched_arguments["timezone"] = self.schedule_call_action.settings.callback_default_timezone
+            enriched_arguments["scheduling_policy"] = deepcopy(call_record.metadata.get("scheduling_policy", {}))
             action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
+            self._validate_scheduling_policy(call_record, action_payload)
             result = await self.schedule_call_action.execute(action_payload)
             content = result.model_dump(mode="json")
             await self.call_service.append_event(
@@ -510,10 +514,67 @@ class MediaBridgeService:
             or "Deepgram returned an error while starting the voice agent session."
         )
 
+    def _validate_scheduling_policy(
+        self,
+        call_record: CallResponse,
+        payload: ScheduleCallActionRequest,
+    ) -> None:
+        policy = call_record.metadata.get("scheduling_policy")
+        if not isinstance(policy, dict):
+            return
+
+        flow_policy = policy.get(payload.type)
+        if not isinstance(flow_policy, dict):
+            return
+
+        scheduled_local_date = self._scheduled_local_date(payload)
+        max_date_value = flow_policy.get("max_scheduled_date")
+        if max_date_value:
+            max_date = date.fromisoformat(str(max_date_value))
+            if scheduled_local_date > max_date:
+                raise AppError(
+                    status_code=400,
+                    code="schedule_outside_allowed_window",
+                    message=(
+                        f"The requested {payload.type.replace('_', ' ')} date is outside the allowed scheduling "
+                        f"window. Offer a date on or before {max_date.isoformat()}."
+                    ),
+                )
+
+        allowed_weekdays = flow_policy.get("allowed_weekdays")
+        if payload.type == "executive_callback" and isinstance(allowed_weekdays, list) and allowed_weekdays:
+            normalized_weekdays = {int(weekday) for weekday in allowed_weekdays}
+            if scheduled_local_date.weekday() not in normalized_weekdays:
+                raise AppError(
+                    status_code=400,
+                    code="schedule_outside_working_days",
+                    message=(
+                        "The requested executive callback date is outside the allowed working days. "
+                        f"Offer one of these working days instead: {self._format_weekdays(sorted(normalized_weekdays))}."
+                    ),
+                )
+
+    def _scheduled_local_date(self, payload: ScheduleCallActionRequest) -> date:
+        timezone_name = payload.timezone or self.schedule_call_action.settings.callback_default_timezone
+        target_timezone = ZoneInfo(timezone_name)
+        scheduled_time = payload.scheduled_time
+        if scheduled_time.tzinfo is None:
+            scheduled_time = scheduled_time.replace(tzinfo=target_timezone)
+        else:
+            scheduled_time = scheduled_time.astimezone(target_timezone)
+        return scheduled_time.date()
+
+    @staticmethod
+    def _format_weekdays(weekdays: list[int]) -> str:
+        weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        return ", ".join(weekday_names[weekday] for weekday in weekdays if 0 <= weekday <= 6)
+
     @staticmethod
     def _build_agent_payload(call_record: CallResponse) -> dict[str, object] | str:
         metadata = deepcopy(call_record.metadata)
         campaign_context = metadata.get("campaign_context") or {}
+        scheduling_policy = metadata.get("scheduling_policy") or {}
+        scheduling_policy_text = MediaBridgeService._format_scheduling_policy_for_prompt(scheduling_policy)
         call_brief_lines = [
             "Call context for the outbound conversation.",
             f"Lead Name: {call_record.lead_name}",
@@ -526,6 +587,7 @@ class MediaBridgeService:
             f"Language Preference: {call_record.language}",
             f"Priority: {call_record.priority}",
             f"Additional Context: {call_record.additional_context or 'None'}",
+            f"Scheduling Limits: {scheduling_policy_text}",
             f"Current System Time: {utc_now_iso()}",
         ]
 
@@ -565,7 +627,9 @@ class MediaBridgeService:
                 "spoken promise alone for scheduling. You already know the current call's phone number "
                 "from the call context, so do not ask the customer for their number. Instead, confirm "
                 "the existing number naturally, for example: 'Is this number okay for our executive to "
-                "call at 3:30 PM?'"
+                "call at 3:30 PM?' If the requested time is outside the scheduling limits in the call "
+                "context, do not call the action. Politely explain that the time is outside the allowed "
+                "window and ask for another date or time that fits the listed limits."
             ).strip()
         else:
             think["prompt"] = prompt
@@ -585,6 +649,28 @@ class MediaBridgeService:
         messages = context.setdefault("messages", [])
         messages.append({"type": "History", "role": "user", "content": call_brief})
         return agent_payload
+
+    @staticmethod
+    def _format_scheduling_policy_for_prompt(policy: object) -> str:
+        if not isinstance(policy, dict) or not policy:
+            return "No custom scheduling limits were configured."
+
+        ai_policy = policy.get("ai_callback") if isinstance(policy.get("ai_callback"), dict) else {}
+        executive_policy = (
+            policy.get("executive_callback")
+            if isinstance(policy.get("executive_callback"), dict)
+            else {}
+        )
+        ai_max_date = ai_policy.get("max_scheduled_date") or "No maximum date"
+        executive_max_date = executive_policy.get("max_scheduled_date") or "No maximum date"
+        executive_weekdays = executive_policy.get("allowed_weekdays")
+        weekday_text = "Any day"
+        if isinstance(executive_weekdays, list) and executive_weekdays:
+            weekday_text = MediaBridgeService._format_weekdays([int(day) for day in executive_weekdays])
+        return (
+            f"AI callbacks may be scheduled on any day until {ai_max_date}. "
+            f"Executive callbacks may be scheduled until {executive_max_date}; allowed working days: {weekday_text}."
+        )
 
 
 @lru_cache
