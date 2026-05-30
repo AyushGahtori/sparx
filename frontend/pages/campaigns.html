@@ -78,8 +78,14 @@
                     <span class="field-help">Required columns: <code>name</code> and <code>phone</code>. Optional: <code>company</code>, <code>city</code>, <code>role</code>, <code>interest</code>.</span>
                   </div>
                   <div class="form-field full-width">
-                    <label for="notes">Notes</label>
-                    <textarea id="notes" name="notes">High-priority prospects</textarea>
+                    <label for="notes">Agent Instructions</label>
+                    <textarea id="notes" name="notes" rows="10"></textarea>
+                    <span class="field-help">This is prefilled from the selected backend agent prompt. Edits here become the campaign-specific instructions used during calls.</span>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="agent-instructions-file">Upload Agent Instructions (.txt)</label>
+                    <input id="agent-instructions-file" type="file" accept=".txt,text/plain">
+                    <span class="field-help">Uploading a text file will replace the instructions above with the file contents.</span>
                   </div>
                 </div>
                 <div class="form-actions">
@@ -154,6 +160,64 @@
               </table>
             </div>
           </section>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Campaign AI Callbacks</h2>
+                  <p class="panel-subtitle">Campaign customers who asked the AI to call them again later.</p>
+                </div>
+                <span id="campaign-ai-callback-count" class="status-pill scheduled">0</span>
+              </div>
+              <div id="campaign-schedule-message"></div>
+              <div class="table-shell">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Campaign</th>
+                      <th>Name</th>
+                      <th>Phone Number</th>
+                      <th>Scheduled Date</th>
+                      <th>Scheduled Time</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="campaign-ai-callback-table-body">
+                    <tr><td colspan="6">Loading campaign AI callbacks...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Campaign Executive Call Requests</h2>
+                  <p class="panel-subtitle">Campaign customers who requested a real person from the team.</p>
+                </div>
+                <span id="campaign-executive-request-count" class="status-pill scheduled">0</span>
+              </div>
+              <div class="table-shell">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Campaign</th>
+                      <th>Name</th>
+                      <th>Phone Number</th>
+                      <th>Scheduled Date</th>
+                      <th>Scheduled Time</th>
+                      <th>Status</th>
+                      <th>Assigned Executive</th>
+                    </tr>
+                  </thead>
+                  <tbody id="campaign-executive-request-table-body">
+                    <tr><td colspan="7">Loading campaign executive requests...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </div>
       </main>
     </div>
@@ -162,6 +226,6 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/campaigns.js"></script>
+  <script type="module" src="../js/campaigns.js?v=campaign-source-schedules"></script>
 </body>
 </html>

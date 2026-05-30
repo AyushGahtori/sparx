@@ -104,6 +104,9 @@ class CallbackService:
         callback_document = CallbackDocument(
             id=callback_id,
             callback_id=callback_id,
+            call_id=payload.call_id,
+            campaign_id=payload.campaign_id,
+            contact_id=payload.contact_id,
             lead_name=payload.lead_name,
             phone=payload.phone,
             company=payload.company,

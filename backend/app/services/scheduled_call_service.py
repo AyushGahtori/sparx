@@ -131,6 +131,11 @@ class ScheduledCallService:
         response_payload["status"] = callback_document.status
         response_payload["scheduled_time"] = callback_document.normalized_callback_time
         response_payload["call_id"] = callback_document.last_call_id or scheduled_call.call_id
+        response_payload["call_type"] = scheduled_call.call_type or (
+            "campaign" if callback_document.campaign_id else "individual"
+        )
+        response_payload["campaign_id"] = scheduled_call.campaign_id or callback_document.campaign_id
+        response_payload["contact_id"] = scheduled_call.contact_id or callback_document.contact_id
         response_payload["metadata"] = {
             **deepcopy(scheduled_call.metadata),
             "callback_status": callback_document.status,

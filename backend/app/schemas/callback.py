@@ -31,6 +31,9 @@ def _strip_string(value):
 class CallbackCreateRequest(BaseModel):
     lead_name: str = Field(min_length=2, max_length=120)
     phone: str = Field(min_length=8, max_length=20)
+    call_id: str | None = Field(default=None, max_length=120)
+    campaign_id: str | None = Field(default=None, max_length=120)
+    contact_id: str | None = Field(default=None, max_length=120)
     callback_reason: str = Field(min_length=3, max_length=300)
     requested_time_raw: str = Field(min_length=2, max_length=200)
     priority: CallbackPriority | None = None

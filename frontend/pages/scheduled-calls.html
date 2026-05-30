@@ -24,10 +24,10 @@
           <section class="panel">
             <div class="panel-header">
               <div>
-                <h2>AI Callbacks</h2>
-                <p class="panel-subtitle">Customers who asked the AI to call them again at a future time.</p>
+                <h2>Manual AI Callbacks</h2>
+                <p class="panel-subtitle">Manual-call customers who asked the AI to call them again at a future time.</p>
               </div>
-              <span id="ai-callback-count" class="status-pill scheduled">0</span>
+              <span id="manual-ai-callback-count" class="status-pill scheduled">0</span>
             </div>
             <div class="table-shell">
               <table class="data-table">
@@ -41,8 +41,8 @@
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="ai-callback-table-body">
-                  <tr><td colspan="6">Loading AI callbacks...</td></tr>
+                <tbody id="manual-ai-callback-table-body">
+                  <tr><td colspan="6">Loading manual AI callbacks...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -51,10 +51,10 @@
           <section class="panel">
             <div class="panel-header">
               <div>
-                <h2>Executive Call Requests</h2>
-                <p class="panel-subtitle">Customers who requested a real person from the team.</p>
+                <h2>Manual Executive Call Requests</h2>
+                <p class="panel-subtitle">Manual-call customers who requested a real person from the team.</p>
               </div>
-              <span id="executive-request-count" class="status-pill scheduled">0</span>
+              <span id="manual-executive-request-count" class="status-pill scheduled">0</span>
             </div>
             <div class="table-shell">
               <table class="data-table">
@@ -69,8 +69,63 @@
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="executive-request-table-body">
-                  <tr><td colspan="7">Loading executive requests...</td></tr>
+                <tbody id="manual-executive-request-table-body">
+                  <tr><td colspan="7">Loading manual executive requests...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Campaign AI Callbacks</h2>
+                <p class="panel-subtitle">Campaign customers who asked the AI to call them again later.</p>
+              </div>
+              <span id="campaign-ai-callback-count" class="status-pill scheduled">0</span>
+            </div>
+            <div class="table-shell">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Phone Number</th>
+                    <th>Scheduled Date</th>
+                    <th>Scheduled Time</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="campaign-ai-callback-table-body">
+                  <tr><td colspan="6">Loading campaign AI callbacks...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Campaign Executive Call Requests</h2>
+                <p class="panel-subtitle">Campaign customers who requested a real person from the team.</p>
+              </div>
+              <span id="campaign-executive-request-count" class="status-pill scheduled">0</span>
+            </div>
+            <div class="table-shell">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Phone Number</th>
+                    <th>Scheduled Date</th>
+                    <th>Scheduled Time</th>
+                    <th>Status</th>
+                    <th>Assigned Executive</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="campaign-executive-request-table-body">
+                  <tr><td colspan="7">Loading campaign executive requests...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -83,6 +138,6 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/scheduled-calls.js"></script>
+  <script type="module" src="../js/scheduled-calls.js?v=campaign-split"></script>
 </body>
 </html>

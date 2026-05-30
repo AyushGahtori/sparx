@@ -93,6 +93,8 @@ def test_build_agent_payload_appends_history_context_without_mutating_source_con
     assert "Voice AI" in history_message["content"]
     assert "schedule_call_action" in agent_payload["think"]["prompt"]
     assert "do not ask the customer for their number" in agent_payload["think"]["prompt"]
+    assert "Campaign-specific instructions from the operator dashboard" in agent_payload["think"]["prompt"]
+    assert "Prior webinar attendees." in agent_payload["think"]["prompt"]
     assert any(
         function.get("name") == "schedule_call_action"
         for function in agent_payload["think"]["functions"]
@@ -207,6 +209,8 @@ async def test_function_call_request_executes_schedule_call_action_with_call_def
     assert action_payload.name == "Avery Stone"
     assert action_payload.phone == "+14155550123"
     assert action_payload.timezone == "Asia/Kolkata"
+    assert action_payload.call_id == "call_123"
+    assert action_payload.call_type == "individual"
 
     response = deepgram_websocket.sent[0]
     assert response["type"] == "FunctionCallResponse"

@@ -86,7 +86,7 @@ class CampaignCreateRequest(BaseModel):
     priority: CampaignPriority
     schedule_type: CampaignScheduleType
     scheduled_at: datetime | None = None
-    notes: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=8000)
     contacts: list[CampaignContactInput] = Field(default_factory=list, min_length=1)
 
     @field_validator("*", mode="before")

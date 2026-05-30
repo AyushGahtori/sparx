@@ -68,6 +68,15 @@ SCHEDULE_CALL_FUNCTION_DEFINITION = {
                 "type": "string",
                 "description": "Optional executive assignment for future sales-team workflows.",
             },
+            "call_type": {
+                "type": "string",
+                "enum": ["individual", "campaign"],
+                "description": "Backend-supplied origin of the active call. The agent should not ask for this.",
+            },
+            "campaign_id": {
+                "type": "string",
+                "description": "Backend-supplied campaign id when the active call came from a campaign.",
+            },
         },
         "required": ["type", "scheduled_time"],
     },
@@ -102,12 +111,22 @@ class ScheduleCallAction:
             phone=payload.phone,
             scheduled_time=scheduled_time,
             timezone=timezone_name,
+            call_id=payload.call_id,
+            call_type=payload.call_type,
+            campaign_id=payload.campaign_id,
+            contact_id=payload.contact_id,
             assigned_executive=payload.assigned_executive,
             requested_time_raw=payload.requested_time_raw or payload.scheduled_time.isoformat(),
             notes=payload.notes,
             created_at=created_at,
             updated_at=created_at,
-            metadata={"action_name": self.name},
+            metadata={
+                "action_name": self.name,
+                "origin_call_type": payload.call_type,
+                "origin_call_id": payload.call_id,
+                "campaign_id": payload.campaign_id,
+                "contact_id": payload.contact_id,
+            },
         )
         created_call = await run_in_threadpool(
             self.scheduled_call_repository.create_scheduled_call,
@@ -128,9 +147,12 @@ class ScheduleCallAction:
             CallbackCreateRequest(
                 lead_name=payload.name,
                 phone=payload.phone,
+                call_id=payload.call_id,
+                campaign_id=payload.campaign_id,
+                contact_id=payload.contact_id,
                 callback_reason=payload.notes or "Customer requested an AI callback.",
                 requested_time_raw=scheduled_call.requested_time_raw or payload.scheduled_time.isoformat(),
-                source="action",
+                source=payload.call_type or "action",
                 timezone=scheduled_call.timezone,
                 notes=payload.notes,
             )

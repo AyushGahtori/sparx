@@ -7,6 +7,7 @@ from app.utils.phone import normalize_phone_number
 
 
 ScheduledCallType = Literal["ai_callback", "executive_callback"]
+ScheduledCallOrigin = Literal["individual", "campaign"]
 ScheduledCallStatus = Literal[
     "scheduled",
     "queued",
@@ -35,6 +36,10 @@ class ScheduleCallActionRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
     requested_time_raw: str | None = Field(default=None, max_length=200)
     assigned_executive: str | None = Field(default=None, max_length=120)
+    call_id: str | None = Field(default=None, max_length=120)
+    call_type: ScheduledCallOrigin | None = None
+    campaign_id: str | None = Field(default=None, max_length=120)
+    contact_id: str | None = Field(default=None, max_length=120)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -57,6 +62,9 @@ class ScheduledCallResponse(BaseModel):
     status: ScheduledCallStatus
     callback_id: str | None = None
     call_id: str | None = None
+    call_type: ScheduledCallOrigin | None = None
+    campaign_id: str | None = None
+    contact_id: str | None = None
     assigned_executive: str | None = None
     requested_time_raw: str | None = None
     notes: str | None = None

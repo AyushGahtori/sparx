@@ -107,12 +107,19 @@ async def test_schedule_call_action_creates_executive_request_without_callback()
             name="Customer Name",
             phone="+919999999999",
             scheduled_time=datetime(2026, 6, 15, 14, 30),
+            call_id="call_123",
+            call_type="campaign",
+            campaign_id="campaign_123",
+            contact_id="contact_123",
         )
     )
 
     assert result.type == "executive_callback"
     assert result.status == "scheduled"
     assert result.callback_id is None
+    assert result.call_id == "call_123"
+    assert result.call_type == "campaign"
+    assert result.campaign_id == "campaign_123"
 
 
 @pytest.mark.asyncio
@@ -127,6 +134,10 @@ async def test_schedule_call_action_creates_ai_callback_record():
             phone="+919999999999",
             scheduled_time=datetime(2026, 6, 15, 14, 30),
             notes="Customer asked to be called later.",
+            call_id="call_456",
+            call_type="campaign",
+            campaign_id="campaign_456",
+            contact_id="contact_456",
         )
     )
 
@@ -134,4 +145,8 @@ async def test_schedule_call_action_creates_ai_callback_record():
     assert result.status == "scheduled"
     assert result.callback_id == "callback_test"
     assert result.metadata["callback_id"] == "callback_test"
+    assert action.callback_service.payloads[0].call_id == "call_456"
+    assert action.callback_service.payloads[0].campaign_id == "campaign_456"
+    assert action.callback_service.payloads[0].contact_id == "contact_456"
+    assert action.callback_service.payloads[0].source == "campaign"
     assert action.callback_service.payloads[0].requested_time_raw == "2026-06-15T14:30:00"

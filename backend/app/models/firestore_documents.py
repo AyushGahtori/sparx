@@ -239,6 +239,9 @@ class ScheduledCallDocument(FirestoreDocument):
     ] = "scheduled"
     callback_id: str | None = None
     call_id: str | None = None
+    call_type: Literal["individual", "campaign"] | None = None
+    campaign_id: str | None = None
+    contact_id: str | None = None
     assigned_executive: str | None = None
     requested_time_raw: str | None = None
     notes: str | None = None

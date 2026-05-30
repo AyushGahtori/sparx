@@ -431,6 +431,10 @@ class MediaBridgeService:
             enriched_arguments = dict(arguments)
             enriched_arguments["name"] = call_record.lead_name
             enriched_arguments["phone"] = call_record.phone
+            enriched_arguments["call_id"] = call_record.call_id
+            enriched_arguments["call_type"] = call_record.call_type
+            enriched_arguments["campaign_id"] = call_record.campaign_id
+            enriched_arguments["contact_id"] = call_record.contact_id
             if not enriched_arguments.get("timezone"):
                 enriched_arguments["timezone"] = self.schedule_call_action.settings.callback_default_timezone
             action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
@@ -526,11 +530,12 @@ class MediaBridgeService:
         ]
 
         if campaign_context:
+            campaign_instructions = campaign_context.get("notes") or call_record.additional_context
             call_brief_lines.extend(
                 [
                     f"Campaign Name: {campaign_context.get('campaign_name') or 'Not provided'}",
                     f"Campaign Type: {campaign_context.get('campaign_type') or 'Not provided'}",
-                    f"Campaign Notes: {campaign_context.get('notes') or 'None'}",
+                    f"Campaign Instructions: {campaign_instructions or 'None'}",
                 ]
             )
 
@@ -562,6 +567,19 @@ class MediaBridgeService:
                 "the existing number naturally, for example: 'Is this number okay for our executive to "
                 "call at 3:30 PM?'"
             ).strip()
+        else:
+            think["prompt"] = prompt
+
+        if campaign_context:
+            campaign_instructions = str(campaign_context.get("notes") or call_record.additional_context or "").strip()
+            if campaign_instructions:
+                think["prompt"] = (
+                    f"{think['prompt']}\n\n"
+                    "Campaign-specific instructions from the operator dashboard:\n"
+                    f"{campaign_instructions}\n\n"
+                    "For this campaign call, follow the campaign-specific instructions above when they differ "
+                    "from the default agent prompt, while still staying truthful, concise, and compliant."
+                ).strip()
 
         context = agent_payload.setdefault("context", {})
         messages = context.setdefault("messages", [])

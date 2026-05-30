@@ -5,6 +5,7 @@ import { emptyState, errorState, loadingState } from "./components/loading.js";
 import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
 import { campaignService } from "./services/campaignService.js";
 import { callService } from "./services/callService.js";
+import { scheduledCallService } from "./services/scheduledCallService.js?v=campaign-schedules";
 import {
   escapeHtml,
   formatDateTime,
@@ -19,6 +20,8 @@ const form = document.getElementById("campaign-form");
 const formMessage = document.getElementById("campaign-form-message");
 const agentSelect = document.getElementById("agent-id");
 const csvFileInput = document.getElementById("csv-file");
+const agentInstructionsInput = document.getElementById("notes");
+const agentInstructionsFileInput = document.getElementById("agent-instructions-file");
 const previewPanel = document.getElementById("csv-preview-panel");
 const createButton = document.getElementById("create-campaign-button");
 const scheduleTypeSelect = document.getElementById("schedule-type");
@@ -29,9 +32,17 @@ const clearFiltersButton = document.getElementById("clear-campaign-filters-butto
 const tableBody = document.getElementById("campaign-table-body");
 const refreshButton = document.getElementById("refresh-campaigns-button");
 const dashboardMessage = document.getElementById("campaign-dashboard-message");
+const campaignAiCallbackTableBody = document.getElementById("campaign-ai-callback-table-body");
+const campaignExecutiveRequestTableBody = document.getElementById("campaign-executive-request-table-body");
+const campaignAiCallbackCount = document.getElementById("campaign-ai-callback-count");
+const campaignExecutiveRequestCount = document.getElementById("campaign-executive-request-count");
+const campaignScheduleMessage = document.getElementById("campaign-schedule-message");
 
 let previewContacts = [];
 let allCampaigns = [];
+let agentPromptMap = new Map();
+let activeAgentDefaultPrompt = "";
+let instructionsEditedByOperator = false;
 let activeSearch = "";
 let activeStatus = "";
 
@@ -65,6 +76,91 @@ function toggleScheduledField() {
 function resetPreview() {
   previewContacts = [];
   previewPanel.innerHTML = emptyState("Upload a CSV to preview valid, invalid, and duplicate rows.");
+}
+
+function getSelectedAgentDefaultPrompt() {
+  return agentPromptMap.get(agentSelect.value) || "";
+}
+
+function applySelectedAgentPrompt({ force = false } = {}) {
+  const nextPrompt = getSelectedAgentDefaultPrompt();
+  const currentPrompt = agentInstructionsInput.value.trim();
+  const canReplacePrompt = force || !instructionsEditedByOperator || currentPrompt === activeAgentDefaultPrompt.trim();
+  activeAgentDefaultPrompt = nextPrompt;
+  if (canReplacePrompt) {
+    agentInstructionsInput.value = nextPrompt;
+    instructionsEditedByOperator = false;
+  }
+}
+
+function formatScheduledDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+  return date.toLocaleDateString();
+}
+
+function formatScheduledTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function getCampaignName(campaignId) {
+  if (!campaignId) {
+    return "Unknown campaign";
+  }
+  return allCampaigns.find((campaign) => campaign.campaign_id === campaignId)?.campaign_name || campaignId;
+}
+
+function renderCampaignAiCallbacks(items) {
+  campaignAiCallbackCount.textContent = String(items.length);
+  if (!items.length) {
+    renderTableEmpty(campaignAiCallbackTableBody, 6, "No campaign AI callbacks have been scheduled yet.");
+    return;
+  }
+
+  campaignAiCallbackTableBody.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(getCampaignName(item.campaign_id))}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.phone)}</td>
+          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
+          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
+          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+function renderCampaignExecutiveRequests(items) {
+  campaignExecutiveRequestCount.textContent = String(items.length);
+  if (!items.length) {
+    renderTableEmpty(campaignExecutiveRequestTableBody, 7, "No campaign executive call requests have been scheduled yet.");
+    return;
+  }
+
+  campaignExecutiveRequestTableBody.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(getCampaignName(item.campaign_id))}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.phone)}</td>
+          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
+          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
+          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
+          <td>${escapeHtml(item.assigned_executive || "Unassigned")}</td>
+        </tr>
+      `,
+    )
+    .join("");
 }
 
 function buildPreviewMarkup(preview) {
@@ -198,11 +294,13 @@ async function loadAgents() {
   try {
     const agents = await callService.listAgents();
     if (!agents.length) {
+      agentPromptMap = new Map();
       agentSelect.innerHTML = "<option value=''>No agents configured</option>";
       renderMessage(formMessage, "info", "No Deepgram agents are available.");
       return;
     }
 
+    agentPromptMap = new Map(agents.map((agent) => [agent.agent_id, agent.default_prompt || ""]));
     agentSelect.innerHTML = agents
       .map(
         (agent) => `
@@ -212,6 +310,7 @@ async function loadAgents() {
         `,
       )
       .join("");
+    applySelectedAgentPrompt({ force: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load agents.";
     renderMessage(formMessage, "error", message);
@@ -277,9 +376,28 @@ async function loadCampaigns() {
   try {
     allCampaigns = await campaignService.listCampaigns();
     renderCampaignRows(applyFilters(allCampaigns));
+    await loadCampaignSchedules();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load campaigns.";
     renderTableError(tableBody, 7, message);
+  }
+}
+
+async function loadCampaignSchedules() {
+  renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
+  renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
+  clearMessage(campaignScheduleMessage);
+
+  try {
+    const scheduledCalls = await scheduledCallService.listScheduledCalls();
+    const campaignSchedules = scheduledCalls.filter((item) => item.call_type === "campaign" || item.campaign_id);
+    renderCampaignAiCallbacks(campaignSchedules.filter((item) => item.type === "ai_callback"));
+    renderCampaignExecutiveRequests(campaignSchedules.filter((item) => item.type === "executive_callback"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load campaign schedules.";
+    renderTableError(campaignAiCallbackTableBody, 6, message);
+    renderTableError(campaignExecutiveRequestTableBody, 7, message);
+    renderMessage(campaignScheduleMessage, "error", message);
   }
 }
 
@@ -337,7 +455,7 @@ async function openCampaignDetails(campaignId) {
           <div><strong>Status:</strong> ${escapeHtml(campaign.status)}</div>
           <div><strong>Objective:</strong> ${escapeHtml(campaign.call_objective)}</div>
           <div><strong>Scheduled:</strong> ${escapeHtml(formatDateTime(campaign.scheduled_at))}</div>
-          <div><strong>Notes:</strong> ${escapeHtml(campaign.notes || "No notes")}</div>
+          <div><strong>Agent Instructions:</strong> ${escapeHtml(campaign.notes || "No campaign-specific instructions")}</div>
           <div><strong>Priority:</strong> ${escapeHtml(campaign.priority)}</div>
         </div>
         <h3 style="margin-top: 1.25rem;">Contacts</h3>
@@ -421,6 +539,7 @@ form.addEventListener("submit", async (event) => {
     scheduledAtInput.value = toLocalDateTimeInputValue();
     toggleScheduledField();
     resetPreview();
+    applySelectedAgentPrompt({ force: true });
     await loadCampaigns();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create the campaign.";
@@ -436,6 +555,7 @@ form.addEventListener("reset", () => {
   window.setTimeout(() => {
     scheduledAtInput.value = toLocalDateTimeInputValue();
     toggleScheduledField();
+    applySelectedAgentPrompt({ force: true });
   }, 0);
   resetPreview();
 });
@@ -443,6 +563,30 @@ form.addEventListener("reset", () => {
 csvFileInput.addEventListener("change", async (event) => {
   const [file] = event.target.files || [];
   await previewCsv(file);
+});
+
+agentInstructionsInput.addEventListener("input", () => {
+  instructionsEditedByOperator = agentInstructionsInput.value.trim() !== activeAgentDefaultPrompt.trim();
+});
+
+agentInstructionsFileInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  if (!file) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".txt") && file.type !== "text/plain") {
+    renderMessage(formMessage, "error", "Upload a plain .txt file for agent instructions.");
+    agentInstructionsFileInput.value = "";
+    return;
+  }
+  const text = await file.text();
+  agentInstructionsInput.value = text.trim();
+  instructionsEditedByOperator = agentInstructionsInput.value.trim() !== activeAgentDefaultPrompt.trim();
+  renderMessage(formMessage, "success", "Agent instructions were loaded from the text file.");
+});
+
+agentSelect.addEventListener("change", () => {
+  applySelectedAgentPrompt();
 });
 
 scheduleTypeSelect.addEventListener("change", toggleScheduledField);

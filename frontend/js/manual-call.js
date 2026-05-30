@@ -1,7 +1,9 @@
 import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
 import { confirmDialog } from "./components/modal.js";
+import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
 import { callService } from "./services/callService.js?v=operator-complete";
+import { scheduledCallService } from "./services/scheduledCallService.js?v=manual-schedules";
 import { getSearchParam } from "./router.js";
 import {
   escapeHtml,
@@ -16,6 +18,10 @@ const formMessage = document.getElementById("form-message");
 const statusPanel = document.getElementById("call-status-panel");
 const submitButton = document.getElementById("submit-button");
 const agentSelect = document.getElementById("agent-id");
+const manualAiCallbackTableBody = document.getElementById("manual-ai-callback-table-body");
+const manualExecutiveRequestTableBody = document.getElementById("manual-executive-request-table-body");
+const manualAiCallbackCount = document.getElementById("manual-ai-callback-count");
+const manualExecutiveRequestCount = document.getElementById("manual-executive-request-count");
 
 let activeCallId = null;
 let pollTimer = null;
@@ -32,6 +38,87 @@ function clearMessage() {
 function setLoadingState(isLoading) {
   submitButton.disabled = isLoading;
   submitButton.textContent = isLoading ? "Starting AI Call..." : "Start AI Call";
+}
+
+function isManualSchedule(item) {
+  return item.call_type !== "campaign" && !item.campaign_id;
+}
+
+function formatScheduledDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+  return date.toLocaleDateString();
+}
+
+function formatScheduledTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderAiCallbacks(items) {
+  manualAiCallbackCount.textContent = String(items.length);
+  if (!items.length) {
+    renderTableEmpty(manualAiCallbackTableBody, 5, "No manual AI callbacks have been scheduled yet.");
+    return;
+  }
+
+  manualAiCallbackTableBody.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.phone)}</td>
+          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
+          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
+          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+function renderExecutiveRequests(items) {
+  manualExecutiveRequestCount.textContent = String(items.length);
+  if (!items.length) {
+    renderTableEmpty(manualExecutiveRequestTableBody, 6, "No manual executive call requests have been scheduled yet.");
+    return;
+  }
+
+  manualExecutiveRequestTableBody.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.phone)}</td>
+          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
+          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
+          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
+          <td>${escapeHtml(item.assigned_executive || "Unassigned")}</td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+async function loadManualSchedules() {
+  renderTableLoading(manualAiCallbackTableBody, 5, "Loading manual AI callbacks...");
+  renderTableLoading(manualExecutiveRequestTableBody, 6, "Loading manual executive requests...");
+
+  try {
+    const scheduledCalls = await scheduledCallService.listScheduledCalls();
+    renderAiCallbacks(scheduledCalls.filter((item) => item.type === "ai_callback" && isManualSchedule(item)));
+    renderExecutiveRequests(scheduledCalls.filter((item) => item.type === "executive_callback" && isManualSchedule(item)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load manual scheduled calls.";
+    renderTableError(manualAiCallbackTableBody, 5, message);
+    renderTableError(manualExecutiveRequestTableBody, 6, message);
+    showError(message);
+  }
 }
 
 function buildStatusMarkup(call) {
@@ -235,6 +322,7 @@ form.addEventListener("submit", async (event) => {
     showSuccess("Manual call started successfully.");
     startPolling(call.call_id);
     await refreshCallStatus();
+    await loadManualSchedules();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the call.";
     renderMessage("error", message);
@@ -297,3 +385,5 @@ bootPage({
 
 applyPrefillFromQuery();
 loadAgents();
+loadManualSchedules();
+window.setInterval(loadManualSchedules, frontendConfig.refreshIntervals.scheduledCallsMs);

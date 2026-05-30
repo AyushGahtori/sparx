@@ -100,6 +100,61 @@
               <div id="call-status-panel" class="empty-state">No call has been started yet.</div>
             </section>
           </div>
+
+          <div class="page-grid two-column">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Manual AI Callbacks</h2>
+                  <p class="panel-subtitle">Manual-call customers who asked the AI to call them again later.</p>
+                </div>
+                <span id="manual-ai-callback-count" class="status-pill scheduled">0</span>
+              </div>
+              <div class="table-shell">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Phone Number</th>
+                      <th>Scheduled Date</th>
+                      <th>Scheduled Time</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="manual-ai-callback-table-body">
+                    <tr><td colspan="5">Loading manual AI callbacks...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Manual Executive Call Requests</h2>
+                  <p class="panel-subtitle">Manual-call customers who requested a real person from the team.</p>
+                </div>
+                <span id="manual-executive-request-count" class="status-pill scheduled">0</span>
+              </div>
+              <div class="table-shell">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Phone Number</th>
+                      <th>Scheduled Date</th>
+                      <th>Scheduled Time</th>
+                      <th>Status</th>
+                      <th>Assigned Executive</th>
+                    </tr>
+                  </thead>
+                  <tbody id="manual-executive-request-table-body">
+                    <tr><td colspan="6">Loading manual executive requests...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </div>
       </main>
     </div>
@@ -108,6 +163,6 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/manual-call.js"></script>
+  <script type="module" src="../js/manual-call.js?v=manual-schedules"></script>
 </body>
 </html>

@@ -24,6 +24,7 @@ class AgentService:
                 purpose=agent.purpose,
                 status=agent.status,
                 supported_languages=agent.supported_languages,
+                default_prompt=self._extract_default_prompt(agent.deepgram_agent_config),
             )
             for agent in agent_configurations
         ]
@@ -101,6 +102,19 @@ class AgentService:
             )
 
         return remote_agents
+
+    @staticmethod
+    def _extract_default_prompt(agent_config: dict | None) -> str | None:
+        if not isinstance(agent_config, dict):
+            return None
+        think_config = agent_config.get("think")
+        if not isinstance(think_config, dict):
+            return None
+        prompt = think_config.get("prompt")
+        if not isinstance(prompt, str):
+            return None
+        cleaned_prompt = prompt.strip()
+        return cleaned_prompt or None
 
 
 @lru_cache

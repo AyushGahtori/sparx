@@ -6,10 +6,14 @@ import { scheduledCallService } from "./services/scheduledCallService.js?v=opera
 import { escapeHtml, formatStatusLabel } from "./utils/formatter.js";
 import { showError, showSuccess } from "./utils/notifications.js";
 
-const aiCallbackTableBody = document.getElementById("ai-callback-table-body");
-const executiveRequestTableBody = document.getElementById("executive-request-table-body");
-const aiCallbackCount = document.getElementById("ai-callback-count");
-const executiveRequestCount = document.getElementById("executive-request-count");
+const manualAiCallbackTableBody = document.getElementById("manual-ai-callback-table-body");
+const manualExecutiveRequestTableBody = document.getElementById("manual-executive-request-table-body");
+const campaignAiCallbackTableBody = document.getElementById("campaign-ai-callback-table-body");
+const campaignExecutiveRequestTableBody = document.getElementById("campaign-executive-request-table-body");
+const manualAiCallbackCount = document.getElementById("manual-ai-callback-count");
+const manualExecutiveRequestCount = document.getElementById("manual-executive-request-count");
+const campaignAiCallbackCount = document.getElementById("campaign-ai-callback-count");
+const campaignExecutiveRequestCount = document.getElementById("campaign-executive-request-count");
 const CLOSABLE_STATUSES = ["scheduled", "queued", "in_progress", "rescheduled", "failed"];
 
 function formatScheduledDate(value) {
@@ -28,14 +32,18 @@ function formatScheduledTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function renderAiCallbacks(items) {
-  aiCallbackCount.textContent = String(items.length);
+function isCampaignSchedule(item) {
+  return item.call_type === "campaign" || Boolean(item.campaign_id);
+}
+
+function renderAiCallbacks(items, tableBody, countElement, emptyMessage) {
+  countElement.textContent = String(items.length);
   if (!items.length) {
-    renderTableEmpty(aiCallbackTableBody, 6, "No AI callbacks have been scheduled by the action yet.");
+    renderTableEmpty(tableBody, 6, emptyMessage);
     return;
   }
 
-  aiCallbackTableBody.innerHTML = items
+  tableBody.innerHTML = items
     .map(
       (item) => `
         <tr>
@@ -51,14 +59,14 @@ function renderAiCallbacks(items) {
     .join("");
 }
 
-function renderExecutiveRequests(items) {
-  executiveRequestCount.textContent = String(items.length);
+function renderExecutiveRequests(items, tableBody, countElement, emptyMessage) {
+  countElement.textContent = String(items.length);
   if (!items.length) {
-    renderTableEmpty(executiveRequestTableBody, 7, "No executive call requests have been scheduled by the action yet.");
+    renderTableEmpty(tableBody, 7, emptyMessage);
     return;
   }
 
-  executiveRequestTableBody.innerHTML = items
+  tableBody.innerHTML = items
     .map(
       (item) => `
         <tr>
@@ -94,19 +102,47 @@ function renderActions(item) {
 }
 
 async function loadScheduledCalls() {
-  renderTableLoading(aiCallbackTableBody, 6, "Loading AI callbacks...");
-  renderTableLoading(executiveRequestTableBody, 7, "Loading executive requests...");
+  renderTableLoading(manualAiCallbackTableBody, 6, "Loading manual AI callbacks...");
+  renderTableLoading(manualExecutiveRequestTableBody, 7, "Loading manual executive requests...");
+  renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
+  renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
 
   try {
     const scheduledCalls = await scheduledCallService.listScheduledCalls();
-    const aiCallbacks = scheduledCalls.filter((item) => item.type === "ai_callback");
-    const executiveRequests = scheduledCalls.filter((item) => item.type === "executive_callback");
-    renderAiCallbacks(aiCallbacks);
-    renderExecutiveRequests(executiveRequests);
+    const manualAiCallbacks = scheduledCalls.filter((item) => item.type === "ai_callback" && !isCampaignSchedule(item));
+    const manualExecutiveRequests = scheduledCalls.filter((item) => item.type === "executive_callback" && !isCampaignSchedule(item));
+    const campaignAiCallbacks = scheduledCalls.filter((item) => item.type === "ai_callback" && isCampaignSchedule(item));
+    const campaignExecutiveRequests = scheduledCalls.filter((item) => item.type === "executive_callback" && isCampaignSchedule(item));
+    renderAiCallbacks(
+      manualAiCallbacks,
+      manualAiCallbackTableBody,
+      manualAiCallbackCount,
+      "No manual AI callbacks have been scheduled by the action yet.",
+    );
+    renderExecutiveRequests(
+      manualExecutiveRequests,
+      manualExecutiveRequestTableBody,
+      manualExecutiveRequestCount,
+      "No manual executive call requests have been scheduled by the action yet.",
+    );
+    renderAiCallbacks(
+      campaignAiCallbacks,
+      campaignAiCallbackTableBody,
+      campaignAiCallbackCount,
+      "No campaign AI callbacks have been scheduled by the action yet.",
+    );
+    renderExecutiveRequests(
+      campaignExecutiveRequests,
+      campaignExecutiveRequestTableBody,
+      campaignExecutiveRequestCount,
+      "No campaign executive call requests have been scheduled by the action yet.",
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load scheduled calls.";
-    renderTableError(aiCallbackTableBody, 6, message);
-    renderTableError(executiveRequestTableBody, 7, message);
+    renderTableError(manualAiCallbackTableBody, 6, message);
+    renderTableError(manualExecutiveRequestTableBody, 7, message);
+    renderTableError(campaignAiCallbackTableBody, 6, message);
+    renderTableError(campaignExecutiveRequestTableBody, 7, message);
     showError(message);
   }
 }
@@ -156,6 +192,8 @@ bootPage({
 });
 
 loadScheduledCalls();
-aiCallbackTableBody.addEventListener("click", handleScheduledCallAction);
-executiveRequestTableBody.addEventListener("click", handleScheduledCallAction);
+manualAiCallbackTableBody.addEventListener("click", handleScheduledCallAction);
+manualExecutiveRequestTableBody.addEventListener("click", handleScheduledCallAction);
+campaignAiCallbackTableBody.addEventListener("click", handleScheduledCallAction);
+campaignExecutiveRequestTableBody.addEventListener("click", handleScheduledCallAction);
 window.setInterval(loadScheduledCalls, frontendConfig.refreshIntervals.scheduledCallsMs);
