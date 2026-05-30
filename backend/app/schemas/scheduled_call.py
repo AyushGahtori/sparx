@@ -64,3 +64,13 @@ class ScheduledCallResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class ScheduledCallStatusUpdateRequest(BaseModel):
+    status: ScheduledCallStatus
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def strip_notes(cls, value):
+        return _strip_string(value)

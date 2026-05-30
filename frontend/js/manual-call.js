@@ -1,5 +1,6 @@
 import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
+import { confirmDialog } from "./components/modal.js";
 import { callService } from "./services/callService.js";
 import { getSearchParam } from "./router.js";
 import {
@@ -18,6 +19,7 @@ const agentSelect = document.getElementById("agent-id");
 
 let activeCallId = null;
 let pollTimer = null;
+const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function renderMessage(type, message) {
   formMessage.innerHTML = `<div class="alert ${type}">${escapeHtml(message)}</div>`;
@@ -37,6 +39,7 @@ function buildStatusMarkup(call) {
   const startedAt = call.started_at ? formatDateTime(call.started_at) : "Not started";
   const endedAt = call.ended_at ? formatDateTime(call.ended_at) : "In progress";
   const summary = call.summary || call.ai_error || "Post-call intelligence is not available yet.";
+  const canMarkCompleted = ACTIVE_CALL_STATUSES.includes(call.status);
 
   return `
     <div class="detail-list">
@@ -89,6 +92,17 @@ function buildStatusMarkup(call) {
         <span>${escapeHtml(call.next_action || "No recommendation available yet.")}</span>
       </div>
     </div>
+    ${
+      canMarkCompleted
+        ? `
+          <div class="form-actions">
+            <button class="button secondary" type="button" data-action="mark-completed" data-call-id="${escapeHtml(call.call_id)}">
+              Mark Completed
+            </button>
+          </div>
+        `
+        : ""
+    }
   `;
 }
 
@@ -235,6 +249,44 @@ form.addEventListener("reset", () => {
   stopPolling();
   activeCallId = null;
   statusPanel.innerHTML = `<div class="empty-state">No call has been started yet.</div>`;
+});
+
+statusPanel.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-action='mark-completed']");
+  if (!button) {
+    return;
+  }
+
+  const callId = button.dataset.callId;
+  if (!callId) {
+    return;
+  }
+
+  const confirmed = await confirmDialog({
+    title: "Mark call completed",
+    message: "Mark this call as completed? This closes the stuck in-progress record so you can call the same number again.",
+    confirmLabel: "Mark completed",
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    button.disabled = true;
+    await callService.updateCallStatus(callId, {
+      status: "completed",
+      notes: "Manually marked completed by operator.",
+    });
+    renderMessage("success", "Call marked completed.");
+    showSuccess("Call marked completed.");
+    await refreshCallStatus();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to mark call completed.";
+    renderMessage("error", message);
+    showError(message);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 bootPage({

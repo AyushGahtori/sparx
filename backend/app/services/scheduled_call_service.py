@@ -10,7 +10,8 @@ from app.repositories.scheduled_call_repository import (
     ScheduledCallRepository,
     get_scheduled_call_repository,
 )
-from app.schemas.scheduled_call import ScheduledCallResponse
+from app.schemas.scheduled_call import ScheduledCallResponse, ScheduledCallStatusUpdateRequest
+from app.utils.time import utc_now
 
 
 class ScheduledCallService:
@@ -46,6 +47,70 @@ class ScheduledCallService:
             scheduled_call_id,
         )
         return await self._hydrate_status(scheduled_call)
+
+    async def update_scheduled_call_status(
+        self,
+        scheduled_call_id: str,
+        payload: ScheduledCallStatusUpdateRequest,
+    ) -> ScheduledCallResponse:
+        scheduled_call = await run_in_threadpool(
+            self.scheduled_call_repository.get_scheduled_call,
+            scheduled_call_id,
+        )
+        now = utc_now()
+        metadata = deepcopy(scheduled_call.metadata)
+        metadata["operator_status_update"] = {
+            "status": payload.status,
+            "notes": payload.notes,
+            "updated_at": now.isoformat(),
+        }
+        updates: dict[str, object] = {
+            "status": payload.status,
+            "metadata": metadata,
+        }
+        if payload.notes:
+            updates["notes"] = payload.notes
+
+        if scheduled_call.callback_id:
+            try:
+                callback_document = await run_in_threadpool(
+                    self.callback_repository.get_callback,
+                    scheduled_call.callback_id,
+                )
+                callback_metadata = deepcopy(callback_document.metadata)
+            except AppError as exc:
+                if exc.code != "callback_not_found":
+                    raise
+                callback_metadata = {}
+            callback_updates: dict[str, object] = {
+                "status": payload.status,
+                "metadata": {
+                    **callback_metadata,
+                    "scheduled_call_id": scheduled_call.scheduled_call_id,
+                    "operator_status_update": {
+                        "status": payload.status,
+                        "notes": payload.notes,
+                        "updated_at": now.isoformat(),
+                    },
+                },
+            }
+            if payload.status == "completed":
+                callback_updates["completed_at"] = now
+                callback_updates["next_retry_time"] = None
+            elif payload.status == "cancelled":
+                callback_updates["next_retry_time"] = None
+            await run_in_threadpool(
+                self.callback_repository.update_callback,
+                scheduled_call.callback_id,
+                callback_updates,
+            )
+
+        updated_call = await run_in_threadpool(
+            self.scheduled_call_repository.update_scheduled_call,
+            scheduled_call_id,
+            updates,
+        )
+        return await self._hydrate_status(updated_call)
 
     async def _hydrate_status(self, scheduled_call: ScheduledCallDocument) -> ScheduledCallResponse:
         if scheduled_call.type != "ai_callback" or not scheduled_call.callback_id:

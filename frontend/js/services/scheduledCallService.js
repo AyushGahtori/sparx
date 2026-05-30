@@ -8,4 +8,8 @@ export const scheduledCallService = {
   scheduleCall(payload) {
     return apiService.post("/actions/schedule-call", payload);
   },
+
+  updateScheduledCallStatus(scheduledCallId, payload) {
+    return apiService.put(`/scheduled-calls/${scheduledCallId}/status`, payload);
+  },
 };

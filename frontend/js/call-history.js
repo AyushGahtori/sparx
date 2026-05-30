@@ -23,6 +23,7 @@ const campaignFilter = document.getElementById("call-campaign-filter");
 
 let allCalls = [];
 let campaignMap = new Map();
+const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function getFilterValue(fieldName) {
   const field = filtersForm.elements.namedItem(fieldName);
@@ -161,7 +162,8 @@ function renderRows(calls) {
         !call.campaign_id &&
         !call.contact_id &&
         !call.callback_id &&
-        !["initiated", "ringing", "answered", "in_progress"].includes(call.status);
+        !ACTIVE_CALL_STATUSES.includes(call.status);
+      const canMarkCompleted = call.call_type === "individual" && ACTIVE_CALL_STATUSES.includes(call.status);
 
       return `
         <tr>
@@ -182,6 +184,11 @@ function renderRows(calls) {
             <div class="table-actions">
               <button class="button secondary small" type="button" data-action="view" data-call-id="${call.call_id}">View Summary</button>
               <button class="button ghost small" type="button" data-action="retry" data-call-id="${call.call_id}">Retry Call</button>
+              ${
+                canMarkCompleted
+                  ? `<button class="button ghost small" type="button" data-action="complete" data-call-id="${call.call_id}">Mark Completed</button>`
+                  : ""
+              }
               ${
                 canDelete
                   ? `<button class="button ghost small danger-outline" type="button" data-action="delete" data-call-id="${call.call_id}">Delete</button>`
@@ -265,6 +272,24 @@ async function handleAction(action, callId) {
       await callService.deleteCall(callId);
       renderMessage("success", "Call record deleted successfully.");
       showSuccess("Call record deleted.");
+      await loadCalls();
+    }
+
+    if (action === "complete") {
+      const confirmed = await confirmDialog({
+        title: "Mark call completed",
+        message: "Mark this stuck manual call as completed so the number can be called again immediately?",
+        confirmLabel: "Mark completed",
+      });
+      if (!confirmed) {
+        return;
+      }
+      await callService.updateCallStatus(callId, {
+        status: "completed",
+        notes: "Manually marked completed by operator.",
+      });
+      renderMessage("success", "Call marked completed successfully.");
+      showSuccess("Call marked completed.");
       await loadCalls();
     }
   } catch (error) {

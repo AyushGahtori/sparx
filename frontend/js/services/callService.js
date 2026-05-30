@@ -17,6 +17,10 @@ export const callService = {
     return apiService.post("/calls/individual", payload);
   },
 
+  updateCallStatus(callId, payload) {
+    return apiService.put(`/calls/${callId}/status`, payload);
+  },
+
   deleteCall(callId) {
     return apiService.delete(`/calls/${callId}`);
   },
