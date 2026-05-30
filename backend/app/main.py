@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config.settings import get_settings
+from app.core.errors import AppError
 from app.core.handlers import register_exception_handlers
 from app.core.logging import configure_logging_with_files, get_logger
 from app.integrations.deepgram import get_deepgram_service
@@ -13,6 +14,7 @@ from app.middleware.response_envelope import ResponseEnvelopeMiddleware
 from app.services.callback_runner_service import get_callback_runner_service
 from app.services.campaign_runner_service import get_campaign_runner_service
 from app.services.post_call_intelligence_runner_service import get_post_call_intelligence_runner_service
+from app.services.public_tunnel_service import get_public_tunnel_service
 from app.utils.time import utc_now
 
 settings = get_settings()
@@ -55,9 +57,15 @@ async def startup_event() -> None:
     callback_runner = get_callback_runner_service()
     campaign_runner = get_campaign_runner_service()
     intelligence_runner = get_post_call_intelligence_runner_service()
+    public_tunnel_service = get_public_tunnel_service()
 
     if twilio_service.is_configured:
         twilio_service.get_client()
+    if settings.has_twilio_config:
+        try:
+            public_tunnel_service.ensure_started_for_local_development()
+        except AppError as exc:
+            logger.warning("Automatic public tunnel startup skipped: %s", exc.message)
     if settings.has_twilio_config and not settings.has_public_base_url:
         logger.warning(
             "PUBLIC_BASE_URL is not configured. Outbound calls and validated webhooks will not work until a public HTTPS URL is configured."
@@ -83,6 +91,7 @@ async def shutdown_event() -> None:
     await get_post_call_intelligence_runner_service().stop()
     await get_callback_runner_service().stop()
     await get_campaign_runner_service().stop()
+    await get_public_tunnel_service().stop()
     logger.info("Application shutdown complete")
 
 

@@ -31,6 +31,7 @@ from app.services.post_call_intelligence_service import (
     PostCallIntelligenceService,
     get_post_call_intelligence_service,
 )
+from app.services.public_tunnel_service import PublicTunnelService, get_public_tunnel_service
 from app.services.retry_service import RetryService
 from app.utils.time import utc_now, utc_now_iso
 from app.utils.urls import to_websocket_url
@@ -53,6 +54,7 @@ class CallService:
         callback_sync_service: CallbackSyncService,
         post_call_intelligence_service: PostCallIntelligenceService,
         post_call_intelligence_runner: PostCallIntelligenceRunnerService,
+        public_tunnel_service: PublicTunnelService,
     ) -> None:
         self.settings = settings
         self.call_repository = call_repository
@@ -63,6 +65,7 @@ class CallService:
         self.callback_sync_service = callback_sync_service
         self.post_call_intelligence_service = post_call_intelligence_service
         self.post_call_intelligence_runner = post_call_intelligence_runner
+        self.public_tunnel_service = public_tunnel_service
 
     async def start_individual_call(self, payload: IndividualCallRequest) -> CallResponse:
         self._ensure_public_base_url()
@@ -507,12 +510,7 @@ class CallService:
         return f"{websocket_base_url}{self.settings.api_v1_prefix}/webhooks/twilio/media"
 
     def _ensure_public_base_url(self) -> None:
-        if not self.settings.has_public_base_url:
-            raise AppError(
-                status_code=400,
-                code="public_base_url_missing",
-                message="PUBLIC_BASE_URL must be configured so Twilio can reach the backend status webhooks and media stream bridge.",
-            )
+        self.public_tunnel_service.ensure_public_url_ready_for_call()
 
     def _build_agent_metadata(self, agent: AgentConfiguration) -> dict[str, object]:
         return {
@@ -744,4 +742,5 @@ def get_call_service() -> CallService:
         callback_sync_service=get_callback_sync_service(),
         post_call_intelligence_service=get_post_call_intelligence_service(),
         post_call_intelligence_runner=get_post_call_intelligence_runner_service(),
+        public_tunnel_service=get_public_tunnel_service(),
     )

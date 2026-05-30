@@ -18,6 +18,8 @@ Thumbs.db
 
 # Local binaries and tunnels
 ngrok.exe
+tools/cloudflared.exe
+tools/cloudflared.*.log
 
 # Secrets and credentials
 *.pem

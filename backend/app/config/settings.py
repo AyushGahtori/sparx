@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     enable_file_logging: bool | None = Field(default=None, alias="ENABLE_FILE_LOGGING")
     request_timeout_seconds: int = Field(default=10, alias="REQUEST_TIMEOUT_SECONDS")
     public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
+    auto_public_tunnel_enabled: bool = Field(default=True, alias="AUTO_PUBLIC_TUNNEL_ENABLED")
+    cloudflared_path: str = Field(default="tools/cloudflared.exe", alias="CLOUDFLARED_PATH")
+    public_tunnel_start_timeout_seconds: int = Field(default=25, alias="PUBLIC_TUNNEL_START_TIMEOUT_SECONDS")
+    public_tunnel_health_timeout_seconds: int = Field(default=6, alias="PUBLIC_TUNNEL_HEALTH_TIMEOUT_SECONDS")
     agents_config_path: str = Field(default="app/config/agents.json", alias="AGENTS_CONFIG_PATH")
     rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
     general_rate_limit_per_minute: int = Field(default=100, alias="GENERAL_RATE_LIMIT_PER_MINUTE")
@@ -122,6 +126,10 @@ class Settings(BaseSettings):
             raise ValueError("AI_MAX_PARALLEL_JOBS must be at least 1.")
         if self.ai_dispatch_interval_seconds < 2:
             raise ValueError("AI_DISPATCH_INTERVAL_SECONDS must be at least 2 seconds.")
+        if self.public_tunnel_start_timeout_seconds < 5:
+            raise ValueError("PUBLIC_TUNNEL_START_TIMEOUT_SECONDS must be at least 5 seconds.")
+        if self.public_tunnel_health_timeout_seconds < 2:
+            raise ValueError("PUBLIC_TUNNEL_HEALTH_TIMEOUT_SECONDS must be at least 2 seconds.")
         try:
             ZoneInfo(self.callback_default_timezone)
         except Exception as exc:
@@ -160,6 +168,10 @@ class Settings(BaseSettings):
         return BACKEND_DIR
 
     @property
+    def project_root(self) -> Path:
+        return self.backend_dir.parent
+
+    @property
     def logs_dir(self) -> Path:
         logs_path = self.backend_dir / "logs"
         logs_path.mkdir(parents=True, exist_ok=True)
@@ -188,6 +200,13 @@ class Settings(BaseSettings):
     @property
     def agents_config_file(self) -> Path:
         return (self.backend_dir / self.agents_config_path).resolve()
+
+    @property
+    def cloudflared_executable_file(self) -> Path:
+        candidate = Path(self.cloudflared_path.strip()).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        return (self.project_root / candidate).resolve()
 
     @property
     def firebase_private_key_text(self) -> str | None:
@@ -250,6 +269,10 @@ class Settings(BaseSettings):
         if not self.public_base_url:
             return None
         return self.public_base_url.rstrip("/")
+
+    @property
+    def uses_cloudflare_quick_tunnel(self) -> bool:
+        return bool(self.normalized_public_base_url and ".trycloudflare.com" in self.normalized_public_base_url)
 
     @property
     def has_twilio_webhook_validation(self) -> bool:
