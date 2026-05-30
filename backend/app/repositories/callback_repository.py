@@ -47,30 +47,39 @@ class CallbackRepository:
     def list_callbacks(
         self,
         *,
-        status: str | None = None,
+        status: str | list[str] | None = None,
         priority: str | None = None,
         source: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
-        for snapshot in self._collection().stream():
+        query = self._collection()
+
+        if status is not None:
+            statuses = [status] if isinstance(status, str) else status
+            if len(statuses) == 1:
+                query = query.where("status", "==", statuses[0])
+            elif statuses:
+                query = query.where("status", "in", statuses)
+
+        if priority is not None:
+            query = query.where("priority", "==", priority)
+
+        if source is not None:
+            query = query.where("source", "==", source)
+
+        if date_from is not None:
+            query = query.where("normalized_callback_time", ">=", date_from)
+
+        if date_to is not None:
+            query = query.where("normalized_callback_time", "<=", date_to)
+
+        for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("callback_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             callback_document = CallbackDocument.model_validate(payload)
-
-            if status and callback_document.status != status:
-                continue
-            if priority and callback_document.priority != priority:
-                continue
-            if source and callback_document.source != source:
-                continue
-            if date_from and callback_document.normalized_callback_time < date_from:
-                continue
-            if date_to and callback_document.normalized_callback_time > date_to:
-                continue
-
             callbacks.append(callback_document)
 
         callbacks.sort(

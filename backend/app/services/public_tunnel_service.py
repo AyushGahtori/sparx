@@ -110,6 +110,7 @@ class PublicTunnelService:
         )
 
         deadline = time.monotonic() + self.settings.public_tunnel_start_timeout_seconds
+        tunnel_url: str | None = None
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise AppError(
@@ -118,16 +119,28 @@ class PublicTunnelService:
                     message="Cloudflared exited before creating a public tunnel.",
                     details={"log": self._read_recent_tunnel_log()},
                 )
-            tunnel_url = self._extract_tunnel_url_from_logs()
-            if tunnel_url:
+            if tunnel_url is None:
+                tunnel_url = self._extract_tunnel_url_from_logs()
+                if tunnel_url:
+                    self.settings.public_base_url = tunnel_url
+                    logger.info("Cloudflare quick tunnel URL detected, waiting for it to become reachable: %s", tunnel_url)
+            if tunnel_url and self.is_public_base_url_reachable():
                 return tunnel_url
             time.sleep(0.5)
 
+        if tunnel_url is None:
+            raise AppError(
+                status_code=503,
+                code="cloudflared_start_timeout",
+                message="Cloudflared did not provide a public tunnel URL in time.",
+                details={"log": self._read_recent_tunnel_log()},
+            )
+
         raise AppError(
             status_code=503,
-            code="cloudflared_start_timeout",
-            message="Cloudflared did not provide a public tunnel URL in time.",
-            details={"log": self._read_recent_tunnel_log()},
+            code="public_base_url_unreachable",
+            message="Cloudflared started a tunnel but the public URL was not reachable in time.",
+            details={"public_base_url": tunnel_url, "log": self._read_recent_tunnel_log()},
         )
 
     def _extract_tunnel_url_from_logs(self) -> str | None:

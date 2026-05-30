@@ -125,24 +125,25 @@ class CallbackRunnerService:
 
     async def _process_due_callbacks(self) -> None:
         try:
-            callbacks = await run_in_threadpool(self.callback_repository.list_callbacks)
+            active_callbacks = await run_in_threadpool(
+                self.callback_repository.list_callbacks,
+                status=list(self.active_statuses),
+            )
+            due_callbacks = await run_in_threadpool(
+                self.callback_repository.list_callbacks,
+                status=list(self.runnable_statuses),
+                date_to=utc_now(),
+            )
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
             raise
 
-        active_count = len([callback for callback in callbacks if callback.status in self.active_statuses])
+        active_count = len(active_callbacks)
         remaining_capacity = max(self.settings.callback_max_parallel_calls - active_count, 0)
         if remaining_capacity == 0:
             return
 
-        now = utc_now()
-        due_callbacks = [
-            callback
-            for callback in callbacks
-            if callback.status in self.runnable_statuses
-            and callback.normalized_callback_time <= now
-        ]
         due_callbacks.sort(key=self._callback_sort_key)
 
         for callback_document in due_callbacks[:remaining_capacity]:
@@ -185,13 +186,14 @@ class CallbackRunnerService:
             )
 
     async def _recover_stale_callbacks(self) -> None:
-        callbacks = await run_in_threadpool(self.callback_repository.list_callbacks)
+        callbacks = await run_in_threadpool(
+            self.callback_repository.list_callbacks,
+            status=list(self.active_statuses),
+        )
         now = utc_now()
         recovered = 0
 
         for callback_document in callbacks:
-            if callback_document.status not in self.active_statuses:
-                continue
 
             last_attempted_at = callback_document.last_attempted_at or callback_document.updated_at or callback_document.created_at
             if last_attempted_at is None:

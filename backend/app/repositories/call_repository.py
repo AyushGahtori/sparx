@@ -50,9 +50,30 @@ class CallRepository:
         self._collection().document(call_id).set(updates, merge=True)
         return self.get_call(call_id)
 
-    def list_calls(self) -> list[CallDocument]:
+    def list_calls(
+        self,
+        *,
+        status: str | list[str] | None = None,
+        ai_processing_status: str | list[str] | None = None,
+    ) -> list[CallDocument]:
         calls: list[CallDocument] = []
-        for snapshot in self._collection().stream():
+        query = self._collection()
+
+        if status is not None:
+            statuses = [status] if isinstance(status, str) else status
+            if len(statuses) == 1:
+                query = query.where("status", "==", statuses[0])
+            elif statuses:
+                query = query.where("status", "in", statuses)
+
+        if ai_processing_status is not None:
+            statuses = [ai_processing_status] if isinstance(ai_processing_status, str) else ai_processing_status
+            if len(statuses) == 1:
+                query = query.where("ai_processing_status", "==", statuses[0])
+            elif statuses:
+                query = query.where("ai_processing_status", "in", statuses)
+
+        for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("call_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
