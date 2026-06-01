@@ -91,9 +91,10 @@ class CallStatusUpdateRequest(BaseModel):
     callback_time: datetime | None = None
     requested_time_raw: str | None = Field(default=None, max_length=200)
     meeting_requested: bool | None = None
+    meeting_time: str | None = Field(default=None, max_length=120)
     duration: int | None = Field(default=None, ge=0)
 
-    @field_validator("notes", "requested_time_raw", mode="before")
+    @field_validator("notes", "requested_time_raw", "meeting_time", mode="before")
     @classmethod
     def strip_notes(cls, value):
         if isinstance(value, str):
@@ -146,6 +147,7 @@ class CallResponse(BaseModel):
     objections: list[str] = Field(default_factory=list)
     next_action: str | None = None
     short_notes: str | None = None
+    meeting_time: str | None = None
     call_outcome: CallOutcome | None = None
     outcome_reason: str | None = None
     ai_score: int | None = None

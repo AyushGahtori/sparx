@@ -91,6 +91,7 @@ class CallDocument(FirestoreDocument):
     objections: list[str] = Field(default_factory=list)
     next_action: str | None = None
     short_notes: str | None = None
+    meeting_time: str | None = None
     call_outcome: Literal["successful", "interested", "callback", "meeting_requested", "not_interested", "failed"] | None = None
     outcome_reason: str | None = None
     ai_score: int | None = None

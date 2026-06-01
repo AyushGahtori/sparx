@@ -9,6 +9,7 @@ from app.models.firestore_documents import CallDocument
 from app.repositories.call_repository import CallRepository, get_call_repository
 from app.schemas.call import CallResponse
 from app.schemas.intelligence import (
+    GemmaCallIntelligenceResponse,
     SummaryDeleteResponse,
     SummaryDetailResponse,
     SummaryListItemResponse,
@@ -18,6 +19,7 @@ from app.services.call_intelligence_rules_service import (
     CallIntelligenceRulesService,
     get_call_intelligence_rules_service,
 )
+from app.services.callback_sync_service import CallbackSyncService, get_callback_sync_service
 from app.services.gemma_service import GemmaService, get_gemma_service
 from app.services.transcript_service import TranscriptService, get_transcript_service
 from app.utils.time import utc_now
@@ -34,11 +36,13 @@ class PostCallIntelligenceService:
         transcript_service: TranscriptService,
         rules_service: CallIntelligenceRulesService,
         gemma_service: GemmaService,
+        callback_sync_service: CallbackSyncService,
     ) -> None:
         self.call_repository = call_repository
         self.transcript_service = transcript_service
         self.rules_service = rules_service
         self.gemma_service = gemma_service
+        self.callback_sync_service = callback_sync_service
 
     async def ingest_transcript(
         self,
@@ -105,11 +109,18 @@ class PostCallIntelligenceService:
             transcript_entries,
             transcript_metrics,
         )
-        intelligence_result, ai_metadata = await self.gemma_service.generate_post_call_intelligence(
-            call_document=call_document,
-            transcript_entries=transcript_entries,
-            rule_hints=rule_hints,
-        )
+        try:
+            intelligence_result, ai_metadata = await self.gemma_service.generate_post_call_intelligence(
+                call_document=call_document,
+                transcript_entries=transcript_entries,
+                rule_hints=rule_hints,
+            )
+        except AppError as exc:
+            intelligence_result = self._build_fallback_intelligence(call_document, transcript_entries, rule_hints)
+            ai_metadata = {
+                "provider": "fallback_rules",
+                "fallback_reason": exc.message,
+            }
 
         final_lead_type = intelligence_result.lead_type
         final_call_outcome = intelligence_result.call_outcome
@@ -132,35 +143,79 @@ class PostCallIntelligenceService:
 
         final_summary = self.transcript_service.trim_words(intelligence_result.summary, 150)
         final_short_notes = self.transcript_service.trim_words(intelligence_result.short_notes, 25)
+        transcript_text = " ".join(entry.text for entry in transcript_entries)
+        final_meeting_time_raw = self.transcript_service.resolve_meeting_time_candidate(
+            next_action=intelligence_result.next_action,
+            summary=intelligence_result.summary,
+            gemma_meeting_time=intelligence_result.meeting_time,
+            transcript_text=transcript_text,
+        )
+        final_meeting_time = self.transcript_service.normalize_meeting_time_text(
+            final_meeting_time_raw,
+            reference_time=call_document.ended_at or call_document.created_at,
+        )
         final_ai_score = round((intelligence_result.ai_score * 0.7) + (transcript_metrics["transcript_clarity_score"] * 0.3))
+
+        update_payload = {
+            "summary": final_summary,
+            "sentiment": intelligence_result.sentiment,
+            "sentiment_confidence": round(intelligence_result.sentiment_confidence, 2),
+            "lead_type": final_lead_type,
+            "lead_confidence": round(intelligence_result.lead_confidence, 2),
+            "lead_reason": final_lead_reason,
+            "objections": intelligence_result.objections,
+            "next_action": intelligence_result.next_action,
+            "short_notes": final_short_notes,
+            "meeting_time": final_meeting_time,
+            "call_outcome": final_call_outcome,
+            "outcome_reason": final_outcome_reason,
+            "ai_score": min(max(final_ai_score, 0), 100),
+            "processed_by_ai": True,
+            "processed_at": utc_now(),
+            "ai_processing_status": "completed",
+            "ai_error": None,
+            "ai_metadata": {
+                "gemma": ai_metadata,
+                "rule_hints": rule_hints,
+                "transcript_metrics": transcript_metrics,
+            },
+        }
+
+        should_schedule_followup = False
+        followup_requested_time_raw: str | None = None
+
+        if final_call_outcome == "meeting_requested":
+            update_payload["meeting_requested"] = True
+            if call_document.status == "completed":
+                update_payload["status"] = "meeting_requested"
+            should_schedule_followup = bool(final_meeting_time)
+            followup_requested_time_raw = final_meeting_time
+        elif final_call_outcome == "callback":
+            update_payload["callback_requested"] = True
+            if call_document.status == "completed":
+                update_payload["status"] = "callback_requested"
+            followup_requested_time_raw = final_meeting_time or intelligence_result.next_action
+            should_schedule_followup = True
+
+        if final_meeting_time and not should_schedule_followup:
+            update_payload["callback_requested"] = True
+            if call_document.status == "completed":
+                update_payload["status"] = "callback_requested"
+            followup_requested_time_raw = final_meeting_time
+            should_schedule_followup = True
 
         updated_call = await run_in_threadpool(
             self.call_repository.update_call,
             call_id,
-            {
-                "summary": final_summary,
-                "sentiment": intelligence_result.sentiment,
-                "sentiment_confidence": round(intelligence_result.sentiment_confidence, 2),
-                "lead_type": final_lead_type,
-                "lead_confidence": round(intelligence_result.lead_confidence, 2),
-                "lead_reason": final_lead_reason,
-                "objections": intelligence_result.objections,
-                "next_action": intelligence_result.next_action,
-                "short_notes": final_short_notes,
-                "call_outcome": final_call_outcome,
-                "outcome_reason": final_outcome_reason,
-                "ai_score": min(max(final_ai_score, 0), 100),
-                "processed_by_ai": True,
-                "processed_at": utc_now(),
-                "ai_processing_status": "completed",
-                "ai_error": None,
-                "ai_metadata": {
-                    "gemma": ai_metadata,
-                    "rule_hints": rule_hints,
-                    "transcript_metrics": transcript_metrics,
-                },
-            },
+            update_payload,
         )
+        if should_schedule_followup and followup_requested_time_raw:
+            await self.callback_sync_service.handle_call_state(
+                previous_call=call_document,
+                updated_call=updated_call,
+                requested_time_raw=followup_requested_time_raw,
+                source="post_call_ai",
+            )
         return self._to_summary_detail(updated_call)
 
     async def list_summaries(
@@ -219,6 +274,7 @@ class PostCallIntelligenceService:
                 "objections": [],
                 "next_action": None,
                 "short_notes": None,
+                "meeting_time": None,
                 "call_outcome": None,
                 "outcome_reason": None,
                 "ai_score": None,
@@ -250,6 +306,46 @@ class PostCallIntelligenceService:
         payload["ai_metadata"] = deepcopy(call_document.ai_metadata)
         return CallResponse.model_validate(payload)
 
+    @staticmethod
+    def _build_fallback_intelligence(
+        call_document: CallDocument,
+        transcript_entries: list,
+        rule_hints: dict[str, object],
+    ) -> GemmaCallIntelligenceResponse:
+        lead_lines = [entry.text.strip() for entry in transcript_entries if entry.speaker == "lead" and entry.text.strip()]
+        summary_basis = " ".join(lead_lines[:3]) or (transcript_entries[0].text if transcript_entries else "Conversation captured.")
+        fallback_summary = (
+            f"Automated fallback summary: {summary_basis[:400]}. "
+            "Gemma was unavailable, so this summary was generated from transcript rules."
+        )
+        objections = list(rule_hints.get("objection_hints", []))
+        lead_type = str(rule_hints.get("lead_type", "warm"))
+        call_outcome = str(rule_hints.get("call_outcome", "successful"))
+        next_action = str(rule_hints.get("next_action", "Review the call and follow up manually."))
+        lead_reason = str(rule_hints.get("lead_reason", "Derived from transcript rule hints."))
+        outcome_reason = str(rule_hints.get("outcome_reason", "Derived from transcript rule hints."))
+
+        if lead_type not in {"hot", "warm", "cold"}:
+            lead_type = "warm"
+        if call_outcome not in {"successful", "interested", "callback", "meeting_requested", "not_interested", "failed"}:
+            call_outcome = "successful"
+
+        return GemmaCallIntelligenceResponse(
+            summary=fallback_summary,
+            sentiment="neutral",
+            sentiment_confidence=0.55,
+            objections=objections,
+            lead_type=lead_type,
+            lead_confidence=0.6,
+            lead_reason=lead_reason,
+            next_action=next_action,
+            short_notes="Fallback intelligence generated from rule hints.",
+            meeting_time=call_document.meeting_time,
+            call_outcome=call_outcome,
+            outcome_reason=outcome_reason,
+            ai_score=60,
+        )
+
     @classmethod
     def _to_summary_list_item(cls, call_document: CallDocument) -> SummaryListItemResponse:
         return SummaryListItemResponse(
@@ -258,12 +354,16 @@ class PostCallIntelligenceService:
             phone=call_document.phone,
             call_date=cls._call_date(call_document),
             campaign_id=call_document.campaign_id,
+            final_status=call_document.final_status,
+            retry_count=call_document.retry_count,
+            next_retry_time=call_document.next_retry_time,
             summary=call_document.summary,
             sentiment=call_document.sentiment,
             lead_type=call_document.lead_type,
             call_outcome=call_document.call_outcome,
             ai_score=call_document.ai_score,
             next_action=call_document.next_action,
+            meeting_time=call_document.meeting_time,
             processed_by_ai=call_document.processed_by_ai,
             processed_at=call_document.processed_at,
             ai_processing_status=call_document.ai_processing_status,
@@ -314,4 +414,5 @@ def get_post_call_intelligence_service() -> PostCallIntelligenceService:
         transcript_service=get_transcript_service(),
         rules_service=get_call_intelligence_rules_service(),
         gemma_service=get_gemma_service(),
+        callback_sync_service=get_callback_sync_service(),
     )

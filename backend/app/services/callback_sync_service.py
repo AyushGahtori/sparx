@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from uuid import uuid4
 
@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 class CallbackSyncService:
     open_statuses = {"scheduled", "queued", "in_progress", "rescheduled", "failed"}
     active_execution_statuses = {"initiated", "ringing", "answered", "in_progress"}
-    callback_creation_statuses = {"callback_requested", "busy", "no_answer"}
+    callback_creation_statuses = {"callback_requested", "meeting_requested", "busy", "no_answer"}
 
     def __init__(
         self,
@@ -63,9 +63,19 @@ class CallbackSyncService:
             return None
 
         if previous_call is not None and previous_call.status == updated_call.status:
-            return None
+            can_create_meeting_confirmation = (
+                updated_call.status == "meeting_requested"
+                and not updated_call.callback_id
+                and bool(updated_call.meeting_time)
+                and updated_call.meeting_time != previous_call.meeting_time
+            )
+            if not can_create_meeting_confirmation:
+                return None
 
-        if updated_call.status in {"busy", "no_answer"} and updated_call.retry_count >= 3:
+        if (
+            updated_call.status in {"busy", "no_answer", "failed"}
+            and updated_call.retry_count >= self.retry_service.settings.call_max_auto_calls
+        ):
             return None
 
         callback_document = await self._create_or_merge_callback_from_call(
@@ -90,6 +100,8 @@ class CallbackSyncService:
             return existing_callback
 
         callback_source, callback_reason = self._derive_callback_reason(call_document)
+        callback_agent_id = "follow_up_agent" if call_document.status == "meeting_requested" else call_document.agent_id
+        callback_agent_name = "Follow-up Agent" if call_document.status == "meeting_requested" else call_document.agent_name
         time_resolution = self._resolve_callback_time(call_document, requested_time_raw=requested_time_raw)
         priority = self.priority_service.resolve_priority(
             callback_reason=callback_reason,
@@ -125,8 +137,8 @@ class CallbackSyncService:
             city=call_document.city,
             role=call_document.role,
             interest=call_document.interest,
-            agent_id=call_document.agent_id,
-            agent_name=call_document.agent_name,
+            agent_id=callback_agent_id,
+            agent_name=callback_agent_name,
             call_objective=call_document.call_objective,
             language=call_document.language,
             additional_context=call_document.additional_context,
@@ -170,6 +182,7 @@ class CallbackSyncService:
                 "requested_time_raw": time_resolution.requested_time_raw,
             },
         )
+        self._kick_runner()
         return created_callback
 
     async def _merge_duplicate_callback(
@@ -219,6 +232,7 @@ class CallbackSyncService:
                 "origin_source": source,
             },
         )
+        self._kick_runner()
         return merged_callback
 
     async def _sync_callback_execution(
@@ -302,6 +316,7 @@ class CallbackSyncService:
                 "retry_count": updated_callback.retry_count,
             },
         )
+        self._kick_runner()
         return updated_callback
 
     def _resolve_callback_time(
@@ -327,6 +342,23 @@ class CallbackSyncService:
                 requested_time_raw=requested_time_raw or call_document.callback_time.isoformat(),
             )
 
+        if call_document.status == "meeting_requested" and call_document.meeting_time:
+            resolution = self.time_service.resolve_requested_time(
+                call_document.meeting_time,
+                timezone_name=timezone_name,
+            )
+            now = utc_now()
+            if resolution.normalized_callback_time <= now:
+                return CallbackTimeResolution(
+                    requested_time_raw=resolution.requested_time_raw,
+                    normalized_callback_time=now + timedelta(minutes=1),
+                    timezone=resolution.timezone,
+                    requested_time_confidence=resolution.requested_time_confidence,
+                    adjustment_reason="Meeting time already passed; scheduled immediate confirmation call.",
+                    parser_strategy=f"{resolution.parser_strategy}_immediate_when_past",
+                )
+            return resolution
+
         raw_value = requested_time_raw or call_document.notes or "next available slot"
         return self.time_service.resolve_requested_time(
             raw_value,
@@ -336,10 +368,14 @@ class CallbackSyncService:
     def _extract_timezone(self, call_document: CallDocument) -> str | None:
         metadata = call_document.metadata or {}
         callback_context = metadata.get("callback_context") or {}
-        return callback_context.get("timezone") or metadata.get("timezone")
+        return callback_context.get("timezone") or metadata.get("timezone") or "Asia/Kolkata"
 
     @staticmethod
     def _derive_callback_reason(call_document: CallDocument) -> tuple[CallbackSource, str]:
+        if call_document.status == "meeting_requested":
+            if call_document.call_type == "campaign":
+                return "campaign", "Schedule confirmation call at the agreed meeting time."
+            return "individual", "Schedule confirmation call at the agreed meeting time."
         if call_document.status == "callback_requested":
             if call_document.call_type == "campaign":
                 return "campaign", "Lead requested a callback during the campaign conversation."
@@ -388,6 +424,15 @@ class CallbackSyncService:
             "payload": payload or {},
         }
         await run_in_threadpool(self.callback_repository.append_event, callback_id, event)
+
+    @staticmethod
+    def _kick_runner() -> None:
+        try:
+            from app.services.callback_runner_service import get_callback_runner_service
+
+            get_callback_runner_service().kick()
+        except Exception:
+            return
 
     @staticmethod
     def _priority_rank(priority: str) -> int:

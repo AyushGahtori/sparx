@@ -9,3 +9,4 @@ websockets>=15.0,<16.0
 python-multipart>=0.0.9,<1.0
 dateparser>=1.2,<2.0
 psutil>=6.0,<7.0
+pymongo>=4.8,<5.0

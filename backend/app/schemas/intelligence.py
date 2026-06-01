@@ -58,6 +58,7 @@ class GemmaCallIntelligenceResponse(BaseModel):
     lead_reason: str = Field(min_length=5, max_length=300)
     next_action: str = Field(min_length=3, max_length=200)
     short_notes: str = Field(min_length=3, max_length=300)
+    meeting_time: str | None = Field(default=None, max_length=120)
     call_outcome: CallOutcome
     outcome_reason: str = Field(min_length=5, max_length=300)
     ai_score: int = Field(ge=0, le=100)
@@ -69,6 +70,11 @@ class GemmaCallIntelligenceResponse(BaseModel):
         if value is None:
             raise ValueError("Structured AI fields cannot be empty.")
         return value
+
+    @field_validator("meeting_time", mode="before")
+    @classmethod
+    def strip_optional_meeting_time(cls, value):
+        return _strip_text(value)
 
     @field_validator("objections", mode="before")
     @classmethod
@@ -91,12 +97,16 @@ class SummaryListItemResponse(BaseModel):
     phone: str
     call_date: datetime | None = None
     campaign_id: str | None = None
+    final_status: str | None = None
+    retry_count: int = 0
+    next_retry_time: datetime | None = None
     summary: str | None = None
     sentiment: SummarySentiment | None = None
     lead_type: LeadType | None = None
     call_outcome: CallOutcome | None = None
     ai_score: int | None = None
     next_action: str | None = None
+    meeting_time: str | None = None
     processed_by_ai: bool
     processed_at: datetime | None = None
     ai_processing_status: AiProcessingStatus

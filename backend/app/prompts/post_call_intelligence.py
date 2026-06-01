@@ -56,6 +56,7 @@ Output requirements:
 - lead_reason: concise explanation grounded in transcript evidence
 - next_action: best next operational step
 - short_notes: maximum 25 words, CRM-style
+- meeting_time: extract from meeting-related evidence in transcript, summary intent, or next_action timing language; return explicit text like "7 PM today"; otherwise null
 - call_outcome: one of successful, interested, callback, meeting_requested, not_interested, failed
 - outcome_reason: concise explanation grounded in transcript evidence
 - ai_score: integer from 0 to 100 representing overall confidence based on transcript clarity, evidence quality, and response certainty

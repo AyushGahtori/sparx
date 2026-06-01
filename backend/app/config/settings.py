@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     callback_max_parallel_calls: int = Field(default=2, alias="CALLBACK_MAX_PARALLEL_CALLS")
     callback_dispatch_interval_seconds: int = Field(default=60, alias="CALLBACK_DISPATCH_INTERVAL_SECONDS")
     callback_duplicate_window_minutes: int = Field(default=60, alias="CALLBACK_DUPLICATE_WINDOW_MINUTES")
+    call_max_auto_calls: int = Field(default=3, alias="CALL_MAX_AUTO_CALLS")
+    call_retry_interval_minutes: int = Field(default=10, alias="CALL_RETRY_INTERVAL_MINUTES")
     gemma_model_name: str = Field(default="gemma-4-26b-a4b-it", alias="GEMMA_MODEL_NAME")
     gemma_request_timeout_seconds: int = Field(default=40, alias="GEMMA_REQUEST_TIMEOUT_SECONDS")
     gemma_max_retries: int = Field(default=2, alias="GEMMA_MAX_RETRIES")
@@ -61,6 +63,9 @@ class Settings(BaseSettings):
     ai_dispatch_interval_seconds: int = Field(default=60, alias="AI_DISPATCH_INTERVAL_SECONDS")
     runner_query_limit: int = Field(default=50, alias="RUNNER_QUERY_LIMIT")
     dashboard_list_limit: int = Field(default=100, alias="DASHBOARD_LIST_LIMIT")
+    mongodb_fallback_enabled: bool = Field(default=False, alias="MONGODB_FALLBACK_ENABLED")
+    mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
+    mongodb_database: str | None = Field(default=None, alias="MONGODB_DATABASE")
     cors_origins_raw: str = Field(
         default="http://127.0.0.1:5500,http://localhost:5500,http://127.0.0.1:8000,http://localhost:8000",
         alias="CORS_ORIGINS",
@@ -120,6 +125,10 @@ class Settings(BaseSettings):
             raise ValueError("CALLBACK_BUSINESS_HOUR_START must be earlier than CALLBACK_BUSINESS_HOUR_END.")
         if self.callback_duplicate_window_minutes < 0:
             raise ValueError("CALLBACK_DUPLICATE_WINDOW_MINUTES cannot be negative.")
+        if self.call_max_auto_calls < 1:
+            raise ValueError("CALL_MAX_AUTO_CALLS must be at least 1.")
+        if self.call_retry_interval_minutes < 1:
+            raise ValueError("CALL_RETRY_INTERVAL_MINUTES must be at least 1.")
         if self.gemma_request_timeout_seconds < 5:
             raise ValueError("GEMMA_REQUEST_TIMEOUT_SECONDS must be at least 5 seconds.")
         if self.gemma_max_retries < 1:
@@ -132,6 +141,8 @@ class Settings(BaseSettings):
             raise ValueError("RUNNER_QUERY_LIMIT must be at least 1.")
         if self.dashboard_list_limit < 1:
             raise ValueError("DASHBOARD_LIST_LIMIT must be at least 1.")
+        if self.mongodb_fallback_enabled and (not self.mongodb_uri or not self.mongodb_database):
+            raise ValueError("MongoDB fallback requires MONGODB_URI and MONGODB_DATABASE.")
         if self.public_tunnel_start_timeout_seconds < 5:
             raise ValueError("PUBLIC_TUNNEL_START_TIMEOUT_SECONDS must be at least 5 seconds.")
         if self.public_tunnel_health_timeout_seconds < 2:

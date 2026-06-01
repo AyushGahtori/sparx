@@ -8,6 +8,7 @@ except ImportError:  # pragma: no cover - defensive fallback when dependencies a
 from starlette.concurrency import run_in_threadpool
 
 from app.database.firestore import FirestoreService, get_firestore_service
+from app.database.mongo_fallback import MongoFallbackService, get_mongo_fallback_service
 from app.integrations.deepgram import DeepgramService, get_deepgram_service
 from app.integrations.twilio import TwilioService, get_twilio_service
 from app.schemas.health import DependencyHealth, HealthResponse, QueueHealth, SystemHealthResponse
@@ -25,6 +26,7 @@ class HealthService:
     def __init__(
         self,
         firestore_service: FirestoreService,
+        mongo_fallback_service: MongoFallbackService,
         twilio_service: TwilioService,
         deepgram_service: DeepgramService,
         gemma_service: GemmaService,
@@ -33,6 +35,7 @@ class HealthService:
         intelligence_runner_service: PostCallIntelligenceRunnerService,
     ) -> None:
         self.firestore_service = firestore_service
+        self.mongo_fallback_service = mongo_fallback_service
         self.twilio_service = twilio_service
         self.deepgram_service = deepgram_service
         self.gemma_service = gemma_service
@@ -42,6 +45,7 @@ class HealthService:
 
     async def get_platform_health(self, started_at: datetime, environment: str) -> HealthResponse:
         firebase_health = await self.get_firebase_health()
+        mongodb_health = await self.get_mongodb_health()
         twilio_health = await self.get_twilio_health()
         deepgram_health = await self.get_deepgram_health()
         gemma_health = await self.get_gemma_health()
@@ -61,6 +65,7 @@ class HealthService:
         return HealthResponse(
             status=overall_status,
             firebase=firebase_health.status,
+            mongodb=mongodb_health.status,
             twilio=twilio_health.status,
             deepgram=deepgram_health.status,
             gemma=gemma_health.status,
@@ -69,6 +74,7 @@ class HealthService:
             environment=environment,
             details={
                 "firebase": firebase_health,
+                "mongodb": mongodb_health,
                 "twilio": twilio_health,
                 "deepgram": deepgram_health,
                 "gemma": gemma_health,
@@ -101,6 +107,7 @@ class HealthService:
             status=overall_status,
             backend="healthy" if overall_status == "healthy" else "degraded",
             firebase=platform_health.firebase,
+            mongodb=platform_health.mongodb,
             twilio=platform_health.twilio,
             deepgram=platform_health.deepgram,
             gemma=platform_health.gemma,
@@ -123,6 +130,9 @@ class HealthService:
     async def get_firebase_health(self) -> DependencyHealth:
         return await run_in_threadpool(self.firestore_service.check_connection)
 
+    async def get_mongodb_health(self) -> DependencyHealth:
+        return await run_in_threadpool(self.mongo_fallback_service.check_connection)
+
     async def get_twilio_health(self) -> DependencyHealth:
         return await run_in_threadpool(self.twilio_service.check_connection)
 
@@ -137,6 +147,7 @@ class HealthService:
 def get_health_service() -> HealthService:
     return HealthService(
         firestore_service=get_firestore_service(),
+        mongo_fallback_service=get_mongo_fallback_service(),
         twilio_service=get_twilio_service(),
         deepgram_service=get_deepgram_service(),
         gemma_service=get_gemma_service(),
