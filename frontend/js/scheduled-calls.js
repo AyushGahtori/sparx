@@ -15,6 +15,7 @@ const manualExecutiveRequestCount = document.getElementById("manual-executive-re
 const campaignAiCallbackCount = document.getElementById("campaign-ai-callback-count");
 const campaignExecutiveRequestCount = document.getElementById("campaign-executive-request-count");
 const CLOSABLE_STATUSES = ["scheduled", "queued", "in_progress", "rescheduled", "failed"];
+let isScheduledCallsRefreshing = false;
 
 function formatScheduledDate(value) {
   const date = new Date(value);
@@ -101,11 +102,18 @@ function renderActions(item) {
   `;
 }
 
-async function loadScheduledCalls() {
-  renderTableLoading(manualAiCallbackTableBody, 6, "Loading manual AI callbacks...");
-  renderTableLoading(manualExecutiveRequestTableBody, 7, "Loading manual executive requests...");
-  renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
-  renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
+async function loadScheduledCalls({ showLoading = true } = {}) {
+  if (isScheduledCallsRefreshing) {
+    return;
+  }
+  isScheduledCallsRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(manualAiCallbackTableBody, 6, "Loading manual AI callbacks...");
+    renderTableLoading(manualExecutiveRequestTableBody, 7, "Loading manual executive requests...");
+    renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
+    renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
+  }
 
   try {
     const scheduledCalls = await scheduledCallService.listScheduledCalls();
@@ -139,11 +147,15 @@ async function loadScheduledCalls() {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load scheduled calls.";
-    renderTableError(manualAiCallbackTableBody, 6, message);
-    renderTableError(manualExecutiveRequestTableBody, 7, message);
-    renderTableError(campaignAiCallbackTableBody, 6, message);
-    renderTableError(campaignExecutiveRequestTableBody, 7, message);
+    if (showLoading) {
+      renderTableError(manualAiCallbackTableBody, 6, message);
+      renderTableError(manualExecutiveRequestTableBody, 7, message);
+      renderTableError(campaignAiCallbackTableBody, 6, message);
+      renderTableError(campaignExecutiveRequestTableBody, 7, message);
+    }
     showError(message);
+  } finally {
+    isScheduledCallsRefreshing = false;
   }
 }
 
@@ -176,7 +188,7 @@ async function handleScheduledCallAction(event) {
       notes: "Manually marked completed by operator.",
     });
     showSuccess("Scheduled call marked completed.");
-    await loadScheduledCalls();
+    await loadScheduledCalls({ showLoading: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to mark scheduled call completed.";
     showError(message);
@@ -191,9 +203,9 @@ bootPage({
   subtitle: "Action-created AI callbacks and executive call requests.",
 });
 
-loadScheduledCalls();
+loadScheduledCalls({ showLoading: true });
 manualAiCallbackTableBody.addEventListener("click", handleScheduledCallAction);
 manualExecutiveRequestTableBody.addEventListener("click", handleScheduledCallAction);
 campaignAiCallbackTableBody.addEventListener("click", handleScheduledCallAction);
 campaignExecutiveRequestTableBody.addEventListener("click", handleScheduledCallAction);
-window.setInterval(loadScheduledCalls, frontendConfig.refreshIntervals.scheduledCallsMs);
+window.setInterval(() => loadScheduledCalls({ showLoading: false }), frontendConfig.refreshIntervals.scheduledCallsMs);

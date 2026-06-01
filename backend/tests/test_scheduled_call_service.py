@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.config.settings import Settings
 from app.models.firestore_documents import CallbackDocument, ScheduledCallDocument
 from app.schemas.scheduled_call import ScheduledCallStatusUpdateRequest
 from app.services.scheduled_call_service import ScheduledCallService
@@ -73,6 +74,7 @@ async def test_marking_scheduled_ai_callback_completed_closes_linked_callback():
     scheduled_repo = FakeScheduledCallRepository(build_scheduled_call())
     callback_repo = FakeCallbackRepository(build_callback())
     service = ScheduledCallService(
+        settings=Settings(_env_file=None),
         scheduled_call_repository=scheduled_repo,
         callback_repository=callback_repo,
     )

@@ -43,14 +43,41 @@ class CampaignRepository:
         payload.setdefault("id", snapshot.id)
         return CampaignDocument.model_validate(payload)
 
-    def list_campaigns(self) -> list[CampaignDocument]:
+    def list_campaigns(self, *, limit: int | None = None) -> list[CampaignDocument]:
         campaigns: list[CampaignDocument] = []
-        for snapshot in self._collection().stream():
+        query = self._collection()
+        if limit is not None:
+            query = query.limit(limit)
+        for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("campaign_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             campaigns.append(CampaignDocument.model_validate(payload))
 
+        campaigns.sort(key=lambda campaign: campaign.created_at or utc_now(), reverse=True)
+        return campaigns
+
+    def list_campaigns_by_statuses(
+        self,
+        statuses: list[str],
+        *,
+        limit_per_status: int,
+    ) -> list[CampaignDocument]:
+        campaigns_by_id: dict[str, CampaignDocument] = {}
+        for status in statuses:
+            query = (
+                self._collection()
+                .where(filter=firestore.FieldFilter("status", "==", status))
+                .limit(limit_per_status)
+            )
+            for snapshot in query.stream():
+                payload = snapshot.to_dict() or {}
+                payload.setdefault("campaign_id", snapshot.id)
+                payload.setdefault("id", snapshot.id)
+                campaign_document = CampaignDocument.model_validate(payload)
+                campaigns_by_id[campaign_document.campaign_id] = campaign_document
+
+        campaigns = list(campaigns_by_id.values())
         campaigns.sort(key=lambda campaign: campaign.created_at or utc_now(), reverse=True)
         return campaigns
 

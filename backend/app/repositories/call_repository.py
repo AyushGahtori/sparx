@@ -55,6 +55,7 @@ class CallRepository:
         *,
         status: str | list[str] | None = None,
         ai_processing_status: str | list[str] | None = None,
+        limit: int | None = None,
     ) -> list[CallDocument]:
         calls: list[CallDocument] = []
         query = self._collection()
@@ -62,22 +63,58 @@ class CallRepository:
         if status is not None:
             statuses = [status] if isinstance(status, str) else status
             if len(statuses) == 1:
-                query = query.where("status", "==", statuses[0])
+                query = query.where(filter=firestore.FieldFilter("status", "==", statuses[0]))
             elif statuses:
-                query = query.where("status", "in", statuses)
+                query = query.where(filter=firestore.FieldFilter("status", "in", statuses))
 
-        if ai_processing_status is not None:
+        elif ai_processing_status is not None:
             statuses = [ai_processing_status] if isinstance(ai_processing_status, str) else ai_processing_status
             if len(statuses) == 1:
-                query = query.where("ai_processing_status", "==", statuses[0])
+                query = query.where(filter=firestore.FieldFilter("ai_processing_status", "==", statuses[0]))
             elif statuses:
-                query = query.where("ai_processing_status", "in", statuses)
+                query = query.where(filter=firestore.FieldFilter("ai_processing_status", "in", statuses))
+
+        if limit is not None:
+            query = query.limit(limit)
 
         for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("call_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
-            calls.append(CallDocument.model_validate(payload))
+            call_document = CallDocument.model_validate(payload)
+            if status is not None:
+                statuses = [status] if isinstance(status, str) else status
+                if call_document.status not in statuses:
+                    continue
+            if ai_processing_status is not None:
+                statuses = [ai_processing_status] if isinstance(ai_processing_status, str) else ai_processing_status
+                if call_document.ai_processing_status not in statuses:
+                    continue
+            calls.append(call_document)
+        calls.sort(key=lambda call: call.created_at or utc_now(), reverse=True)
+        return calls
+
+    def list_calls_by_ai_processing_statuses(
+        self,
+        statuses: list[str],
+        *,
+        limit_per_status: int,
+    ) -> list[CallDocument]:
+        calls_by_id: dict[str, CallDocument] = {}
+        for status in statuses:
+            query = (
+                self._collection()
+                .where(filter=firestore.FieldFilter("ai_processing_status", "==", status))
+                .limit(limit_per_status)
+            )
+            for snapshot in query.stream():
+                payload = snapshot.to_dict() or {}
+                payload.setdefault("call_id", snapshot.id)
+                payload.setdefault("id", snapshot.id)
+                call_document = CallDocument.model_validate(payload)
+                calls_by_id[call_document.call_id] = call_document
+
+        calls = list(calls_by_id.values())
         calls.sort(key=lambda call: call.created_at or utc_now(), reverse=True)
         return calls
 
@@ -85,8 +122,7 @@ class CallRepository:
         cutoff = utc_now() - timedelta(minutes=within_minutes)
         candidates = (
             self._collection()
-            .where("phone", "==", phone)
-            .where("call_type", "==", "individual")
+            .where(filter=firestore.FieldFilter("phone", "==", phone))
             .stream()
         )
         duplicate_candidates: list[CallDocument] = []
@@ -95,6 +131,8 @@ class CallRepository:
             payload.setdefault("call_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             call_document = CallDocument.model_validate(payload)
+            if call_document.call_type != "individual":
+                continue
             if call_document.callback_id:
                 continue
             if (call_document.created_at or utc_now()) < cutoff:
@@ -143,7 +181,7 @@ class CallRepository:
     def get_call_by_twilio_sid(self, twilio_call_sid: str) -> CallDocument | None:
         documents = (
             self._collection()
-            .where("twilio_call_sid", "==", twilio_call_sid)
+            .where(filter=firestore.FieldFilter("twilio_call_sid", "==", twilio_call_sid))
             .limit(1)
             .stream()
         )

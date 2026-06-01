@@ -49,7 +49,11 @@ class CallbackRunnerService:
             await self._recover_stale_callbacks()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                raise
+                logger.warning("Callback recovery failed: %s", exc)
+            else:
+                logger.info("Callback Firestore not configured: %s", exc.message)
+        except Exception as exc:
+            logger.warning("Callback recovery skipped due to error: %s", exc)
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="callback-runner")
         logger.info(
             "Callback runner started | max_parallel_calls=%s | dispatch_interval_seconds=%s",
@@ -126,19 +130,26 @@ class CallbackRunnerService:
     async def _process_due_callbacks(self) -> None:
         try:
             active_callbacks = await run_in_threadpool(
-                self.callback_repository.list_callbacks,
-                status=list(self.active_statuses),
+                self.callback_repository.list_callbacks_by_statuses,
+                list(self.active_statuses),
+                limit_per_status=self.settings.runner_query_limit,
             )
             due_callbacks = await run_in_threadpool(
-                self.callback_repository.list_callbacks,
-                status=list(self.runnable_statuses),
-                date_to=utc_now(),
+                self.callback_repository.list_callbacks_by_statuses,
+                list(self.runnable_statuses),
+                limit_per_status=self.settings.runner_query_limit,
             )
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
             raise
 
+        now = utc_now()
+        due_callbacks = [
+            callback
+            for callback in due_callbacks
+            if callback.normalized_callback_time <= now
+        ]
         active_count = len(active_callbacks)
         remaining_capacity = max(self.settings.callback_max_parallel_calls - active_count, 0)
         if remaining_capacity == 0:
@@ -187,8 +198,9 @@ class CallbackRunnerService:
 
     async def _recover_stale_callbacks(self) -> None:
         callbacks = await run_in_threadpool(
-            self.callback_repository.list_callbacks,
-            status=list(self.active_statuses),
+            self.callback_repository.list_callbacks_by_statuses,
+            list(self.active_statuses),
+            limit_per_status=self.settings.runner_query_limit,
         )
         now = utc_now()
         recovered = 0

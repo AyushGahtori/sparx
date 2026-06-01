@@ -55,7 +55,7 @@ class CampaignContactRepository:
 
     def list_contacts_by_campaign(self, campaign_id: str) -> list[CampaignContactDocument]:
         contacts: list[CampaignContactDocument] = []
-        snapshots = self._collection().where("campaign_id", "==", campaign_id).stream()
+        snapshots = self._collection().where(filter=firestore.FieldFilter("campaign_id", "==", campaign_id)).stream()
         for snapshot in snapshots:
             payload = snapshot.to_dict() or {}
             payload.setdefault("contact_id", snapshot.id)

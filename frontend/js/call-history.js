@@ -23,6 +23,7 @@ const campaignFilter = document.getElementById("call-campaign-filter");
 
 let allCalls = [];
 let campaignMap = new Map();
+let isCallsRefreshing = false;
 const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function getFilterValue(fieldName) {
@@ -218,15 +219,27 @@ async function loadCampaignMap() {
   }
 }
 
-async function loadCalls() {
-  renderTableLoading(tableBody, 9, "Loading calls...");
+async function loadCalls({ showLoading = true } = {}) {
+  if (isCallsRefreshing) {
+    return;
+  }
+  isCallsRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(tableBody, 9, "Loading calls...");
+  }
 
   try {
     allCalls = await callService.listCalls();
     renderRows(applyFilters(allCalls));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load call history.";
-    renderTableError(tableBody, 9, message);
+    if (showLoading) {
+      renderTableError(tableBody, 9, message);
+    }
+    showError(message);
+  } finally {
+    isCallsRefreshing = false;
   }
 }
 
@@ -272,7 +285,7 @@ async function handleAction(action, callId) {
       await callService.deleteCall(callId);
       renderMessage("success", "Call record deleted successfully.");
       showSuccess("Call record deleted.");
-      await loadCalls();
+      await loadCalls({ showLoading: false });
     }
 
     if (action === "complete") {
@@ -290,7 +303,7 @@ async function handleAction(action, callId) {
       });
       renderMessage("success", "Call marked completed successfully.");
       showSuccess("Call marked completed.");
-      await loadCalls();
+      await loadCalls({ showLoading: false });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to complete the call history action.";
@@ -310,7 +323,7 @@ clearFiltersButton.addEventListener("click", () => {
 });
 
 refreshButton.addEventListener("click", async () => {
-  await loadCalls();
+  await loadCalls({ showLoading: true });
   showSuccess("Call history refreshed.");
 });
 
@@ -329,5 +342,5 @@ bootPage({
 });
 
 loadCampaignMap();
-loadCalls();
-window.setInterval(loadCalls, frontendConfig.refreshIntervals.callHistoryMs);
+loadCalls({ showLoading: true });
+window.setInterval(() => loadCalls({ showLoading: false }), frontendConfig.refreshIntervals.callHistoryMs);

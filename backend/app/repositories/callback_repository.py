@@ -52,34 +52,56 @@ class CallbackRepository:
         source: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        limit: int | None = None,
     ) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
         query = self._collection()
 
+        server_filtered_field: str | None = None
         if status is not None:
             statuses = [status] if isinstance(status, str) else status
             if len(statuses) == 1:
-                query = query.where("status", "==", statuses[0])
+                query = query.where(filter=firestore.FieldFilter("status", "==", statuses[0]))
+                server_filtered_field = "status"
             elif statuses:
-                query = query.where("status", "in", statuses)
+                query = query.where(filter=firestore.FieldFilter("status", "in", statuses))
+                server_filtered_field = "status"
 
-        if priority is not None:
-            query = query.where("priority", "==", priority)
+        elif priority is not None:
+            query = query.where(filter=firestore.FieldFilter("priority", "==", priority))
+            server_filtered_field = "priority"
 
-        if source is not None:
-            query = query.where("source", "==", source)
+        elif source is not None:
+            query = query.where(filter=firestore.FieldFilter("source", "==", source))
+            server_filtered_field = "source"
 
-        if date_from is not None:
-            query = query.where("normalized_callback_time", ">=", date_from)
+        elif date_from is not None:
+            query = query.where(filter=firestore.FieldFilter("normalized_callback_time", ">=", date_from))
+            server_filtered_field = "date"
 
-        if date_to is not None:
-            query = query.where("normalized_callback_time", "<=", date_to)
+        if server_filtered_field == "date" and date_to is not None:
+            query = query.where(filter=firestore.FieldFilter("normalized_callback_time", "<=", date_to))
+
+        if limit is not None:
+            query = query.limit(limit)
 
         for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("callback_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             callback_document = CallbackDocument.model_validate(payload)
+            if status is not None:
+                statuses = [status] if isinstance(status, str) else status
+                if callback_document.status not in statuses:
+                    continue
+            if priority is not None and callback_document.priority != priority:
+                continue
+            if source is not None and callback_document.source != source:
+                continue
+            if date_from is not None and callback_document.normalized_callback_time < date_from:
+                continue
+            if date_to is not None and callback_document.normalized_callback_time > date_to:
+                continue
             callbacks.append(callback_document)
 
         callbacks.sort(
@@ -90,9 +112,38 @@ class CallbackRepository:
         )
         return callbacks
 
+    def list_callbacks_by_statuses(
+        self,
+        statuses: list[str],
+        *,
+        limit_per_status: int,
+    ) -> list[CallbackDocument]:
+        callbacks_by_id: dict[str, CallbackDocument] = {}
+        for status in statuses:
+            query = (
+                self._collection()
+                .where(filter=firestore.FieldFilter("status", "==", status))
+                .limit(limit_per_status)
+            )
+            for snapshot in query.stream():
+                payload = snapshot.to_dict() or {}
+                payload.setdefault("callback_id", snapshot.id)
+                payload.setdefault("id", snapshot.id)
+                callback_document = CallbackDocument.model_validate(payload)
+                callbacks_by_id[callback_document.callback_id] = callback_document
+
+        callbacks = list(callbacks_by_id.values())
+        callbacks.sort(
+            key=lambda callback: (
+                callback.normalized_callback_time,
+                callback.created_at or utc_now(),
+            )
+        )
+        return callbacks
+
     def list_callbacks_by_phone(self, phone: str) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
-        snapshots = self._collection().where("phone", "==", phone).stream()
+        snapshots = self._collection().where(filter=firestore.FieldFilter("phone", "==", phone)).stream()
         for snapshot in snapshots:
             payload = snapshot.to_dict() or {}
             payload.setdefault("callback_id", snapshot.id)
@@ -108,7 +159,7 @@ class CallbackRepository:
         return callbacks
 
     def get_callback_by_origin_call(self, call_id: str) -> CallbackDocument | None:
-        snapshots = self._collection().where("call_id", "==", call_id).limit(1).stream()
+        snapshots = self._collection().where(filter=firestore.FieldFilter("call_id", "==", call_id)).limit(1).stream()
         snapshot = next(snapshots, None)
         if snapshot is None:
             return None

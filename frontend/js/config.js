@@ -6,13 +6,13 @@ export const frontendConfig = Object.freeze({
   requestTimeoutMs: Number(runtimeConfig.requestTimeoutMs || 20000),
   environmentLabel: runtimeConfig.environmentLabel || "Local",
   refreshIntervals: Object.freeze({
-    dashboardMs: 20000,
-    manualCallMs: 8000,
-    campaignsMs: 15000,
-    scheduledCallsMs: 15000,
-    callbacksMs: 12000,
-    summariesMs: 15000,
-    callHistoryMs: 15000,
+    dashboardMs: 60000,
+    manualCallMs: 12000,
+    campaignsMs: 60000,
+    scheduledCallsMs: 60000,
+    callbacksMs: 60000,
+    summariesMs: 60000,
+    callHistoryMs: 60000,
   }),
 });
 
