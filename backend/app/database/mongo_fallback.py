@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from functools import lru_cache
-from threading import Lock
+import json
+from copy import deepcopy
+from threading import RLock
 from typing import Any
 
 from app.config.settings import Settings, get_settings
@@ -14,7 +18,8 @@ class MongoFallbackService:
         self.settings = settings
         self._client = None
         self._db = None
-        self._lock = Lock()
+        self._lock = RLock()
+        self.local_fallback_path = self.settings.backend_dir / "data" / "local_fallback_store.json"
 
     @property
     def is_configured(self) -> bool:
@@ -94,18 +99,20 @@ class MongoFallbackService:
     def upsert(self, collection: str, document_id: str, payload: dict[str, Any]) -> None:
         db = self._database()
         if db is None:
+            self._local_upsert(collection, document_id, payload)
             return
         db[collection].update_one({"_id": document_id}, {"$set": {**payload, "_id": document_id}}, upsert=True)
 
     def get(self, collection: str, document_id: str) -> dict[str, Any] | None:
         db = self._database()
         if db is None:
-            return None
+            return self._local_get(collection, document_id)
         return db[collection].find_one({"_id": document_id})
 
     def delete(self, collection: str, document_id: str) -> None:
         db = self._database()
         if db is None:
+            self._local_delete(collection, document_id)
             return
         db[collection].delete_one({"_id": document_id})
 
@@ -118,7 +125,7 @@ class MongoFallbackService:
     ) -> list[dict[str, Any]]:
         db = self._database()
         if db is None:
-            return []
+            return self._local_list(collection, query or {}, limit=limit)
         cursor = db[collection].find(query or {})
         if limit is not None:
             cursor = cursor.limit(limit)
@@ -127,12 +134,79 @@ class MongoFallbackService:
     def append_array_item(self, collection: str, document_id: str, field_name: str, value: Any) -> None:
         db = self._database()
         if db is None:
+            self._local_append_array_item(collection, document_id, field_name, value)
             return
         db[collection].update_one(
             {"_id": document_id},
             {"$push": {field_name: value}},
             upsert=True,
         )
+
+    def _read_local_store(self) -> dict[str, dict[str, dict[str, Any]]]:
+        with self._lock:
+            if not self.local_fallback_path.exists():
+                return {}
+            try:
+                return json.loads(self.local_fallback_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("Unable to read local fallback store: %s", exc)
+                return {}
+
+    def _write_local_store(self, store: dict[str, dict[str, dict[str, Any]]]) -> None:
+        with self._lock:
+            self.local_fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            serialized = json.dumps(store, ensure_ascii=True, indent=2, sort_keys=True, default=str)
+            self.local_fallback_path.write_text(serialized + "\n", encoding="utf-8")
+
+    def _local_upsert(self, collection: str, document_id: str, payload: dict[str, Any]) -> None:
+        store = self._read_local_store()
+        collection_store = store.setdefault(collection, {})
+        existing = collection_store.get(document_id, {})
+        collection_store[document_id] = {**existing, **deepcopy(payload), "_id": document_id}
+        self._write_local_store(store)
+
+    def _local_get(self, collection: str, document_id: str) -> dict[str, Any] | None:
+        store = self._read_local_store()
+        payload = store.get(collection, {}).get(document_id)
+        return deepcopy(payload) if payload else None
+
+    def _local_delete(self, collection: str, document_id: str) -> None:
+        store = self._read_local_store()
+        if document_id in store.get(collection, {}):
+            del store[collection][document_id]
+            self._write_local_store(store)
+
+    def _local_list(
+        self,
+        collection: str,
+        query: dict[str, Any],
+        *,
+        limit: int | None,
+    ) -> list[dict[str, Any]]:
+        store = self._read_local_store()
+        items = [deepcopy(payload) for payload in store.get(collection, {}).values()]
+        filtered = [payload for payload in items if self._matches_query(payload, query)]
+        if limit is not None:
+            return filtered[:limit]
+        return filtered
+
+    def _local_append_array_item(self, collection: str, document_id: str, field_name: str, value: Any) -> None:
+        store = self._read_local_store()
+        collection_store = store.setdefault(collection, {})
+        payload = collection_store.setdefault(document_id, {"_id": document_id})
+        existing = payload.get(field_name)
+        if not isinstance(existing, list):
+            existing = []
+        existing.append(deepcopy(value))
+        payload[field_name] = existing
+        self._write_local_store(store)
+
+    @staticmethod
+    def _matches_query(payload: dict[str, Any], query: dict[str, Any]) -> bool:
+        for key, expected in query.items():
+            if payload.get(key) != expected:
+                return False
+        return True
 
 
 @lru_cache
