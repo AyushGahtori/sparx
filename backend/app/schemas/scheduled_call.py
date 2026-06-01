@@ -41,6 +41,7 @@ class ScheduleCallActionRequest(BaseModel):
     assigned_executive: str | None = Field(default=None, max_length=120)
     communication_mode: CommunicationMode = "phone_call"
     attendee_email: str | None = Field(default=None, max_length=254)
+    attendee_email_confirmed: bool = False
     call_id: str | None = Field(default=None, max_length=120)
     call_type: ScheduledCallOrigin | None = None
     campaign_id: str | None = Field(default=None, max_length=120)
@@ -72,6 +73,10 @@ class ScheduleCallActionRequest(BaseModel):
                 raise ValueError("Google Meet scheduling is only available for executive callback requests.")
             if not self.attendee_email:
                 raise ValueError("Attendee email is required for Google Meet scheduling.")
+            if not self.attendee_email_confirmed:
+                raise ValueError(
+                    "Attendee email must be spelled back to the customer and confirmed before Google Meet scheduling."
+                )
         return self
 
 

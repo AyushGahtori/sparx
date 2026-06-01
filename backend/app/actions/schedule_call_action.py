@@ -84,6 +84,13 @@ SCHEDULE_CALL_FUNCTION_DEFINITION = {
                     "repeat it letter by letter and only send this after the customer confirms it is correct."
                 ),
             },
+            "attendee_email_confirmed": {
+                "type": "boolean",
+                "description": (
+                    "Must be true for Google Meet. Set true only after you spell the complete normalized "
+                    "email address back to the customer, character by character, and the customer confirms it."
+                ),
+            },
             "call_type": {
                 "type": "string",
                 "enum": ["individual", "campaign"],

@@ -202,6 +202,7 @@ async def test_schedule_call_action_creates_google_meet_request_with_invite_fiel
             call_id="call_789",
             communication_mode="google_meet",
             attendee_email="customer at gmail dot com",
+            attendee_email_confirmed=True,
         )
     )
 
@@ -230,6 +231,7 @@ async def test_schedule_call_action_keeps_executive_request_when_google_invite_f
             scheduled_time=datetime(2026, 6, 15, 14, 30),
             communication_mode="google_meet",
             attendee_email="customer@gmail.com",
+            attendee_email_confirmed=True,
         )
     )
 
@@ -239,3 +241,15 @@ async def test_schedule_call_action_keeps_executive_request_when_google_invite_f
     assert result.invite_email_status == "failed"
     assert result.invite_error == "Calendar unavailable"
     assert "normal executive call" in result.metadata["agent_message"]
+
+
+def test_google_meet_request_requires_confirmed_email():
+    with pytest.raises(ValueError, match="must be spelled back"):
+        ScheduleCallActionRequest(
+            type="executive_callback",
+            name="Customer Name",
+            phone="+919999999999",
+            scheduled_time=datetime(2026, 6, 15, 14, 30),
+            communication_mode="google_meet",
+            attendee_email="customer@gmail.com",
+        )
