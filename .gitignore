@@ -5,6 +5,7 @@ __pycache__/
 venv/
 env/
 backend/.env
+backend/data/
 backend/logs/*.log
 backend/logs/*.out
 backend/logs/*.err

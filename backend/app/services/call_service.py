@@ -352,6 +352,7 @@ class CallService:
             callback_requested=payload.callback_requested,
             callback_time=payload.callback_time,
             meeting_requested=payload.meeting_requested,
+            meeting_time=payload.meeting_time,
             duration=payload.duration,
         )
         updated_call = await run_in_threadpool(self.call_repository.update_call, call_id, updates)
@@ -390,6 +391,7 @@ class CallService:
             callback_requested=None,
             callback_time=None,
             meeting_requested=None,
+            meeting_time=None,
             duration=payload.call_duration,
         )
         updated_call = await run_in_threadpool(self.call_repository.update_call, existing_call.call_id, updates)
@@ -484,6 +486,7 @@ class CallService:
             callback_requested=None,
             callback_time=None,
             meeting_requested=None,
+            meeting_time=None,
             duration=existing_call.duration,
         )
         updated_call = await run_in_threadpool(self.call_repository.update_call, call_id, updates)
@@ -617,6 +620,7 @@ class CallService:
         callback_requested: bool | None,
         callback_time,
         meeting_requested: bool | None,
+        meeting_time: str | None,
         duration: int | None,
     ) -> dict[str, object]:
         now = utc_now()
@@ -631,6 +635,8 @@ class CallService:
             updates["callback_time"] = callback_time
         if meeting_requested is not None:
             updates["meeting_requested"] = meeting_requested
+        if meeting_time is not None:
+            updates["meeting_time"] = meeting_time
 
         if status == "callback_requested":
             updates["callback_requested"] = True

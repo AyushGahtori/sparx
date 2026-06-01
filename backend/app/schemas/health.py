@@ -13,6 +13,7 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded"]
     backend: Literal["healthy"] = "healthy"
     firebase: Literal["connected", "not_configured", "unavailable"]
+    mongodb: Literal["connected", "not_configured", "unavailable"] = "not_configured"
     twilio: Literal["connected", "not_configured", "unavailable"]
     deepgram: Literal["connected", "not_configured", "unavailable"]
     gemma: Literal["connected", "not_configured", "unavailable"]
@@ -36,6 +37,7 @@ class SystemHealthResponse(BaseModel):
     status: Literal["healthy", "degraded"]
     backend: Literal["healthy", "degraded"]
     firebase: Literal["connected", "not_configured", "unavailable"]
+    mongodb: Literal["connected", "not_configured", "unavailable"] = "not_configured"
     twilio: Literal["connected", "not_configured", "unavailable"]
     deepgram: Literal["connected", "not_configured", "unavailable"]
     gemma: Literal["connected", "not_configured", "unavailable"]

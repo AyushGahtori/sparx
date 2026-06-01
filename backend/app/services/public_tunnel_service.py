@@ -24,7 +24,7 @@ class PublicTunnelService:
         self.stderr_log_path = self.settings.logs_dir / "cloudflared.err.log"
         self.stdout_log_path = self.settings.logs_dir / "cloudflared.out.log"
 
-    def ensure_started_for_local_development(self) -> str | None:
+    def ensure_started_for_local_development(self, *, wait_until_reachable: bool = False) -> str | None:
         if self.settings.environment != "local" or not self.settings.auto_public_tunnel_enabled:
             return self.settings.normalized_public_base_url
 
@@ -34,8 +34,9 @@ class PublicTunnelService:
         if self.settings.normalized_public_base_url and self.is_public_base_url_reachable():
             return self.settings.normalized_public_base_url
 
-        tunnel_url = self._start_cloudflared_quick_tunnel()
+        tunnel_url = self._start_cloudflared_quick_tunnel(wait_until_reachable=wait_until_reachable)
         self.settings.public_base_url = tunnel_url
+        self._persist_public_base_url(tunnel_url)
         logger.info("Cloudflare quick tunnel started and PUBLIC_BASE_URL set for this backend process: %s", tunnel_url)
         return tunnel_url
 
@@ -49,6 +50,9 @@ class PublicTunnelService:
                     code="public_base_url_missing",
                     message="PUBLIC_BASE_URL must be configured so Twilio can reach the backend status webhooks and media stream bridge.",
                 )
+
+        if self._has_active_quick_tunnel():
+            return
 
         if not self.is_public_base_url_reachable():
             if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
@@ -76,7 +80,7 @@ class PublicTunnelService:
         except (OSError, URLError, TimeoutError, ValueError):
             return False
 
-    def _start_cloudflared_quick_tunnel(self) -> str:
+    def _start_cloudflared_quick_tunnel(self, *, wait_until_reachable: bool) -> str:
         executable = self.settings.cloudflared_executable_file
         if not executable.exists():
             raise AppError(
@@ -123,8 +127,10 @@ class PublicTunnelService:
                 tunnel_url = self._extract_tunnel_url_from_logs()
                 if tunnel_url:
                     self.settings.public_base_url = tunnel_url
+                    if not wait_until_reachable:
+                        return tunnel_url
                     logger.info("Cloudflare quick tunnel URL detected, waiting for it to become reachable: %s", tunnel_url)
-            if tunnel_url and self.is_public_base_url_reachable():
+            if tunnel_url and wait_until_reachable and self.is_public_base_url_reachable():
                 return tunnel_url
             time.sleep(0.5)
 
@@ -142,6 +148,24 @@ class PublicTunnelService:
             message="Cloudflared started a tunnel but the public URL was not reachable in time.",
             details={"public_base_url": tunnel_url, "log": self._read_recent_tunnel_log()},
         )
+
+    def _persist_public_base_url(self, tunnel_url: str) -> None:
+        env_path = self.settings.backend_dir / ".env"
+        if not env_path.exists():
+            return
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            updated = False
+            for index, line in enumerate(lines):
+                if line.startswith("PUBLIC_BASE_URL="):
+                    lines[index] = f"PUBLIC_BASE_URL={tunnel_url}"
+                    updated = True
+                    break
+            if not updated:
+                lines.append(f"PUBLIC_BASE_URL={tunnel_url}")
+            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Unable to persist PUBLIC_BASE_URL to backend/.env: %s", exc)
 
     def _extract_tunnel_url_from_logs(self) -> str | None:
         log_text = self._read_recent_tunnel_log()
@@ -162,6 +186,15 @@ class PublicTunnelService:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+
+    def _has_active_quick_tunnel(self) -> bool:
+        return bool(
+            self.settings.environment == "local"
+            and self.settings.auto_public_tunnel_enabled
+            and self.settings.uses_cloudflare_quick_tunnel
+            and self.process
+            and self.process.poll() is None
+        )
 
     async def stop(self) -> None:
         self._stop_managed_process()
