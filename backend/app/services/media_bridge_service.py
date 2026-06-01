@@ -443,7 +443,7 @@ class MediaBridgeService:
             action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
             self._validate_scheduling_policy(call_record, action_payload)
             result = await self.schedule_call_action.execute(action_payload)
-            content = result.model_dump(mode="json")
+            content = self._build_schedule_call_action_content(result)
             await self.call_service.append_event(
                 call_id,
                 event_type="schedule_call_action_completed",
@@ -453,6 +453,10 @@ class MediaBridgeService:
                     "scheduled_call_id": result.scheduled_call_id,
                     "type": result.type,
                     "scheduled_time": result.scheduled_time.isoformat(),
+                    "communication_mode": result.communication_mode,
+                    "attendee_email": result.attendee_email,
+                    "google_meet_link": result.google_meet_link,
+                    "invite_email_status": result.invite_email_status,
                 },
             )
             return self._build_function_response(
@@ -505,6 +509,33 @@ class MediaBridgeService:
             "name": function_name,
             "content": json.dumps(content, default=str),
         }
+
+    @staticmethod
+    def _build_schedule_call_action_content(result: object) -> dict[str, object]:
+        communication_mode = getattr(result, "communication_mode", "phone_call")
+        invite_status = getattr(result, "invite_email_status", "not_required")
+        scheduled_time = getattr(result, "scheduled_time", None)
+        content = {
+            "scheduled_call_id": getattr(result, "scheduled_call_id", None),
+            "type": getattr(result, "type", None),
+            "status": getattr(result, "status", None),
+            "scheduled_time": scheduled_time.isoformat() if scheduled_time else None,
+            "timezone": getattr(result, "timezone", None),
+            "communication_mode": communication_mode,
+            "attendee_email": getattr(result, "attendee_email", None),
+            "invite_email_status": invite_status,
+        }
+        if communication_mode == "google_meet":
+            content["message_for_customer"] = (
+                "The Google Meet calendar invite has been sent. Ask whether they received it. "
+                "Do not read the Meet URL or any backend fields aloud."
+                if invite_status == "sent"
+                else (
+                    "The Google Meet invite could not be sent right now. Tell the customer to check later, "
+                    "and explain that a normal executive phone call is also scheduled as fallback."
+                )
+            )
+        return content
 
     @staticmethod
     def _extract_deepgram_error_message(payload: dict[str, object]) -> str:
@@ -620,16 +651,41 @@ class MediaBridgeService:
         if ScheduleCallAction.name not in prompt:
             think["prompt"] = (
                 f"{prompt}\n\n"
-                "When a customer asks for a callback, says this is not a good time, or requests to speak "
-                "with a real person, collect a clear date and time if needed. After the customer confirms "
-                f"the time, call {ScheduleCallAction.name}. Use ai_callback for automated AI callbacks "
-                "and executive_callback for human executive or sales-team requests. Do not rely on a "
-                "spoken promise alone for scheduling. You already know the current call's phone number "
-                "from the call context, so do not ask the customer for their number. Instead, confirm "
-                "the existing number naturally, for example: 'Is this number okay for our executive to "
-                "call at 3:30 PM?' If the requested time is outside the scheduling limits in the call "
-                "context, do not call the action. Politely explain that the time is outside the allowed "
-                "window and ask for another date or time that fits the listed limits."
+                "Scheduling workflow rules. Follow this order exactly when a customer asks for a callback, "
+                "says this is not a good time, or requests to speak with a real person. Do not skip steps, "
+                "do not repeat completed steps, and do not ask for information already available in the call context.\n"
+                "1. If the customer wants the AI to call back later, collect and confirm a clear date and time. "
+                "If the requested time is outside the scheduling limits in the call context, do not call the action. "
+                "Politely explain that the time is outside the allowed window and ask for another date or time "
+                f"that fits the listed limits. After the customer confirms a valid time, call {ScheduleCallAction.name} "
+                "with type ai_callback.\n"
+                "2. If the customer wants a human executive, sales person, representative, or real person, first "
+                "collect and confirm a clear date and time. Do not discuss the phone number yet.\n"
+                "3. After the executive call date and time is confirmed, ask exactly which communication mode they prefer: "
+                "'Would you prefer our executive to call you on this phone number, or should I send a Google Meet link "
+                "to your email?' This question must happen before any phone-number confirmation.\n"
+                "4. If the customer chooses a normal phone call, only then confirm the existing phone number naturally, "
+                "for example: 'Great, we will use this same number for our executive to call you at 3:30 PM. Is that okay?' "
+                "You already know the current call's phone number from the call context, so do not ask the customer "
+                "for their number, do not ask them to spell their number, and do not request a new number unless they "
+                "clearly say they want to use a different number. After they confirm, call "
+                f"{ScheduleCallAction.name} with type executive_callback and communication_mode phone_call.\n"
+                "5. If the customer chooses Google Meet, ask them to spell their Gmail address slowly. Normalize spoken "
+                "words like 'at' and 'dot'. Then repeat the complete normalized email in a confirmation-friendly way: "
+                "read each word or segment and also spell every character, for example "
+                "'g a h t o r i a y u s h two five at gmail dot com'. Ask 'Is that correct?' Wait for a clear yes "
+                "before calling the action.\n"
+                "6. Only after that email confirmation, call "
+                f"{ScheduleCallAction.name} with type executive_callback, communication_mode google_meet, attendee_email, "
+                "and attendee_email_confirmed true. If the customer has not confirmed the spelled email, do not call "
+                "the action. If the action rejects the email because it was not confirmed, apologize, spell the email "
+                "again, ask for confirmation again, and retry only after a clear yes.\n"
+                "7. After a Google Meet action succeeds, ask if they received the invite. Do not read any raw URL, JSON, "
+                "HTTPS link, event id, backend field, or function result aloud. If they say no, tell them it can take "
+                "a few minutes, ask them to check spam/all mail, and explain that a normal executive call is also "
+                "scheduled as fallback.\n"
+                "Do not rely on a spoken promise alone for scheduling. The schedule_call_action is required for every "
+                "AI callback, phone executive callback, and Google Meet executive callback."
             ).strip()
         else:
             think["prompt"] = prompt

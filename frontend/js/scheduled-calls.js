@@ -63,7 +63,7 @@ function renderAiCallbacks(items, tableBody, countElement, emptyMessage) {
 function renderExecutiveRequests(items, tableBody, countElement, emptyMessage) {
   countElement.textContent = String(items.length);
   if (!items.length) {
-    renderTableEmpty(tableBody, 7, emptyMessage);
+    renderTableEmpty(tableBody, 11, emptyMessage);
     return;
   }
 
@@ -76,6 +76,10 @@ function renderExecutiveRequests(items, tableBody, countElement, emptyMessage) {
           <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
           <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
           <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
+          <td>${escapeHtml(formatCommunicationMode(item.communication_mode))}</td>
+          <td>${escapeHtml(item.attendee_email || "-")}</td>
+          <td>${renderMeetLink(item)}</td>
+          <td>${escapeHtml(formatInviteStatus(item.invite_email_status))}</td>
           <td>${escapeHtml(item.assigned_executive || "Unassigned")}</td>
           <td>${renderActions(item)}</td>
         </tr>
@@ -110,9 +114,9 @@ async function loadScheduledCalls({ showLoading = true } = {}) {
 
   if (showLoading) {
     renderTableLoading(manualAiCallbackTableBody, 6, "Loading manual AI callbacks...");
-    renderTableLoading(manualExecutiveRequestTableBody, 7, "Loading manual executive requests...");
+    renderTableLoading(manualExecutiveRequestTableBody, 11, "Loading manual executive requests...");
     renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
-    renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
+    renderTableLoading(campaignExecutiveRequestTableBody, 11, "Loading campaign executive requests...");
   }
 
   try {
@@ -149,14 +153,35 @@ async function loadScheduledCalls({ showLoading = true } = {}) {
     const message = error instanceof Error ? error.message : "Unable to load scheduled calls.";
     if (showLoading) {
       renderTableError(manualAiCallbackTableBody, 6, message);
-      renderTableError(manualExecutiveRequestTableBody, 7, message);
+      renderTableError(manualExecutiveRequestTableBody, 11, message);
       renderTableError(campaignAiCallbackTableBody, 6, message);
-      renderTableError(campaignExecutiveRequestTableBody, 7, message);
+      renderTableError(campaignExecutiveRequestTableBody, 11, message);
     }
     showError(message);
   } finally {
     isScheduledCallsRefreshing = false;
   }
+}
+
+function formatCommunicationMode(value) {
+  if (value === "google_meet") {
+    return "Google Meet";
+  }
+  return "Phone Call";
+}
+
+function formatInviteStatus(value) {
+  if (!value || value === "not_required") {
+    return "-";
+  }
+  return formatStatusLabel(value);
+}
+
+function renderMeetLink(item) {
+  if (!item.google_meet_link) {
+    return "-";
+  }
+  return `<a href="${escapeHtml(item.google_meet_link)}" target="_blank" rel="noopener noreferrer">Open Meet</a>`;
 }
 
 async function handleScheduledCallAction(event) {

@@ -16,6 +16,7 @@ from app.repositories.scheduled_call_repository import (
 from app.schemas.callback import CallbackCreateRequest
 from app.schemas.scheduled_call import ScheduleCallActionRequest, ScheduledCallResponse
 from app.services.callback_service import CallbackService, get_callback_service
+from app.services.google_calendar_service import GoogleCalendarService, get_google_calendar_service
 from app.utils.time import utc_now
 
 SCHEDULE_CALL_FUNCTION_DEFINITION = {
@@ -68,6 +69,28 @@ SCHEDULE_CALL_FUNCTION_DEFINITION = {
                 "type": "string",
                 "description": "Optional executive assignment for future sales-team workflows.",
             },
+            "communication_mode": {
+                "type": "string",
+                "enum": ["phone_call", "google_meet"],
+                "description": (
+                    "Use phone_call when the customer wants a normal executive callback. Use google_meet "
+                    "only after the customer chooses Google Meet and confirms their email address."
+                ),
+            },
+            "attendee_email": {
+                "type": "string",
+                "description": (
+                    "Confirmed email address for Google Meet invites. Normalize spoken email first, then "
+                    "repeat it letter by letter and only send this after the customer confirms it is correct."
+                ),
+            },
+            "attendee_email_confirmed": {
+                "type": "boolean",
+                "description": (
+                    "Must be true for Google Meet. Set true only after you spell the complete normalized "
+                    "email address back to the customer, character by character, and the customer confirms it."
+                ),
+            },
             "call_type": {
                 "type": "string",
                 "enum": ["individual", "campaign"],
@@ -93,11 +116,13 @@ class ScheduleCallAction:
         scheduled_call_repository: ScheduledCallRepository,
         callback_repository: CallbackRepository,
         callback_service: CallbackService,
+        google_calendar_service: GoogleCalendarService,
     ) -> None:
         self.settings = settings
         self.scheduled_call_repository = scheduled_call_repository
         self.callback_repository = callback_repository
         self.callback_service = callback_service
+        self.google_calendar_service = google_calendar_service
 
     async def execute(self, payload: ScheduleCallActionRequest) -> ScheduledCallResponse:
         scheduled_time, timezone_name = self._normalize_scheduled_time(payload)
@@ -116,6 +141,9 @@ class ScheduleCallAction:
             campaign_id=payload.campaign_id,
             contact_id=payload.contact_id,
             assigned_executive=payload.assigned_executive,
+            communication_mode=payload.communication_mode,
+            attendee_email=payload.attendee_email,
+            invite_email_status="pending" if payload.communication_mode == "google_meet" else "not_required",
             requested_time_raw=payload.requested_time_raw or payload.scheduled_time.isoformat(),
             notes=payload.notes,
             created_at=created_at,
@@ -127,6 +155,7 @@ class ScheduleCallAction:
                 "campaign_id": payload.campaign_id,
                 "contact_id": payload.contact_id,
                 "scheduling_policy": payload.scheduling_policy,
+                "communication_mode": payload.communication_mode,
             },
         )
         created_call = await run_in_threadpool(
@@ -137,7 +166,53 @@ class ScheduleCallAction:
         if payload.type == "ai_callback":
             return await self._create_ai_callback(payload, created_call)
 
+        if payload.communication_mode == "google_meet":
+            created_call = await self._create_google_meet_invite(payload, created_call)
+
         return self._to_response(created_call)
+
+    async def _create_google_meet_invite(
+        self,
+        payload: ScheduleCallActionRequest,
+        scheduled_call: ScheduledCallDocument,
+    ) -> ScheduledCallDocument:
+        invite_result = await run_in_threadpool(
+            self.google_calendar_service.create_meet_invite,
+            attendee_email=payload.attendee_email,
+            attendee_name=payload.name,
+            attendee_phone=payload.phone,
+            scheduled_time=scheduled_call.scheduled_time,
+            timezone_name=scheduled_call.timezone,
+            notes=payload.notes,
+        )
+        agent_message = (
+            "Google Meet invite sent. Ask the customer whether they received the invite."
+            if invite_result.invite_email_status == "sent"
+            else (
+                "Google Meet invite could not be sent. Tell the customer to check later, and explain that "
+                "a normal executive call has also been scheduled as a fallback."
+            )
+        )
+        return await run_in_threadpool(
+            self.scheduled_call_repository.update_scheduled_call,
+            scheduled_call.scheduled_call_id,
+            {
+                "google_meet_link": invite_result.meet_link,
+                "google_calendar_event_id": invite_result.event_id,
+                "google_calendar_event_link": invite_result.event_link,
+                "invite_email_status": invite_result.invite_email_status,
+                "invite_error": invite_result.error,
+                "metadata": {
+                    **scheduled_call.metadata,
+                    "google_calendar_event_id": invite_result.event_id,
+                    "google_calendar_event_link": invite_result.event_link,
+                    "google_meet_link": invite_result.meet_link,
+                    "invite_email_status": invite_result.invite_email_status,
+                    "invite_error": invite_result.error,
+                    "agent_message": agent_message,
+                },
+            },
+        )
 
     async def _create_ai_callback(
         self,
@@ -223,4 +298,5 @@ def get_schedule_call_action() -> ScheduleCallAction:
         scheduled_call_repository=get_scheduled_call_repository(),
         callback_repository=get_callback_repository(),
         callback_service=get_callback_service(),
+        google_calendar_service=get_google_calendar_service(),
     )

@@ -93,6 +93,9 @@ def test_build_agent_payload_appends_history_context_without_mutating_source_con
     assert "Voice AI" in history_message["content"]
     assert "schedule_call_action" in agent_payload["think"]["prompt"]
     assert "do not ask the customer for their number" in agent_payload["think"]["prompt"]
+    assert "which communication mode they prefer" in agent_payload["think"]["prompt"]
+    assert "attendee_email_confirmed true" in agent_payload["think"]["prompt"]
+    assert "Do not read any raw URL" in agent_payload["think"]["prompt"]
     assert "outside the scheduling limits" in agent_payload["think"]["prompt"]
     assert "Scheduling Limits:" in history_message["content"]
     assert "Campaign-specific instructions from the operator dashboard" in agent_payload["think"]["prompt"]
@@ -218,7 +221,9 @@ async def test_function_call_request_executes_schedule_call_action_with_call_def
     assert response["type"] == "FunctionCallResponse"
     assert response["id"] == "func_123"
     assert response["name"] == "schedule_call_action"
-    assert json.loads(response["content"])["scheduled_call_id"] == "scheduled_call_test"
+    response_content = json.loads(response["content"])
+    assert response_content["scheduled_call_id"] == "scheduled_call_test"
+    assert "google_meet_link" not in response_content
     assert call_service.events[0]["event_type"] == "schedule_call_action_completed"
 
 

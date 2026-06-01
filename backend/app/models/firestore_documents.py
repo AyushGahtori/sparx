@@ -244,6 +244,13 @@ class ScheduledCallDocument(FirestoreDocument):
     campaign_id: str | None = None
     contact_id: str | None = None
     assigned_executive: str | None = None
+    communication_mode: Literal["phone_call", "google_meet"] = "phone_call"
+    attendee_email: str | None = None
+    google_meet_link: str | None = None
+    google_calendar_event_id: str | None = None
+    google_calendar_event_link: str | None = None
+    invite_email_status: Literal["not_required", "pending", "sent", "failed"] = "not_required"
+    invite_error: str | None = None
     requested_time_raw: str | None = None
     notes: str | None = None
     source: Literal["schedule_call_action"] = "schedule_call_action"
