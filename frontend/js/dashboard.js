@@ -149,10 +149,19 @@ function renderCallbackWidget(callbacks) {
   `;
 }
 
-async function loadDashboard() {
-  renderTableLoading(recentCallsBody, 5, "Loading recent calls...");
-  campaignStatusWidget.innerHTML = "Loading campaigns...";
-  callbackQueueWidget.innerHTML = "Loading callbacks...";
+let isDashboardRefreshing = false;
+
+async function loadDashboard({ showLoading = true } = {}) {
+  if (isDashboardRefreshing) {
+    return;
+  }
+  isDashboardRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(recentCallsBody, 5, "Loading recent calls...");
+    campaignStatusWidget.innerHTML = "Loading campaigns...";
+    callbackQueueWidget.innerHTML = "Loading callbacks...";
+  }
 
   try {
     const [health, calls, campaigns, callbacks, summaries] = await Promise.all([
@@ -170,10 +179,14 @@ async function loadDashboard() {
     refreshButton.dataset.lastStatus = health.status;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load dashboard data.";
-    renderTableError(recentCallsBody, 5, message);
-    campaignStatusWidget.innerHTML = errorState(message);
-    callbackQueueWidget.innerHTML = errorState(message);
+    if (showLoading) {
+      renderTableError(recentCallsBody, 5, message);
+      campaignStatusWidget.innerHTML = errorState(message);
+      callbackQueueWidget.innerHTML = errorState(message);
+    }
     showError(message);
+  } finally {
+    isDashboardRefreshing = false;
   }
 }
 
@@ -184,9 +197,9 @@ bootPage({
 });
 
 refreshButton.addEventListener("click", async () => {
-  await loadDashboard();
+  await loadDashboard({ showLoading: true });
   showSuccess("Dashboard refreshed.");
 });
 
-loadDashboard();
-window.setInterval(loadDashboard, frontendConfig.refreshIntervals.dashboardMs);
+loadDashboard({ showLoading: true });
+window.setInterval(() => loadDashboard({ showLoading: false }), frontendConfig.refreshIntervals.dashboardMs);

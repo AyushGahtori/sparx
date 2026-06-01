@@ -1,5 +1,7 @@
 from typing import Any
 
+from firebase_admin import firestore
+
 from app.core.errors import AppError
 from app.database.firestore import FirestoreService, get_firestore_service
 from app.models.firestore_documents import ScheduledCallDocument
@@ -46,15 +48,19 @@ class ScheduledCallRepository:
         *,
         type: str | None = None,
         status: str | None = None,
+        limit: int | None = None,
     ) -> list[ScheduledCallDocument]:
         scheduled_calls: list[ScheduledCallDocument] = []
-        for snapshot in self._collection().stream():
+        query = self._collection()
+        if type:
+            query = query.where(filter=firestore.FieldFilter("type", "==", type))
+        if limit is not None:
+            query = query.limit(limit)
+        for snapshot in query.stream():
             payload = snapshot.to_dict() or {}
             payload.setdefault("scheduled_call_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             scheduled_call = ScheduledCallDocument.model_validate(payload)
-            if type and scheduled_call.type != type:
-                continue
             if status and scheduled_call.status != status:
                 continue
             scheduled_calls.append(scheduled_call)

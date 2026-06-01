@@ -128,7 +128,10 @@ class CampaignService:
         return await self.get_campaign(campaign_id)
 
     async def list_campaigns(self) -> list[CampaignResponse]:
-        campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
+        campaigns = await run_in_threadpool(
+            self.campaign_repository.list_campaigns,
+            limit=self.settings.dashboard_list_limit,
+        )
         return [self._to_response(campaign) for campaign in campaigns]
 
     async def get_campaign(self, campaign_id: str) -> CampaignResponse:

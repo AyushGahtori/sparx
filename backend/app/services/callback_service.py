@@ -50,6 +50,7 @@ class CallbackService:
         runner_service: CallbackRunnerService,
         sync_service: CallbackSyncService,
         duplicate_window_minutes: int,
+        dashboard_list_limit: int,
     ) -> None:
         self.callback_repository = callback_repository
         self.agent_service = agent_service
@@ -58,6 +59,7 @@ class CallbackService:
         self.runner_service = runner_service
         self.sync_service = sync_service
         self.duplicate_window_minutes = duplicate_window_minutes
+        self.dashboard_list_limit = dashboard_list_limit
 
     async def list_callbacks(
         self,
@@ -75,6 +77,7 @@ class CallbackService:
             source=source,
             date_from=date_from,
             date_to=date_to,
+            limit=self.dashboard_list_limit,
         )
         callbacks.sort(key=self._sort_key)
         return [self._to_response(callback_document) for callback_document in callbacks]
@@ -330,4 +333,5 @@ def get_callback_service() -> CallbackService:
         runner_service=get_callback_runner_service(),
         sync_service=get_callback_sync_service(),
         duplicate_window_minutes=settings.callback_duplicate_window_minutes,
+        dashboard_list_limit=settings.dashboard_list_limit,
     )

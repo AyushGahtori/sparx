@@ -55,7 +55,11 @@ class CampaignRunnerService:
             await self._recover_stale_dispatches()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                raise
+                logger.warning("Campaign recovery failed: %s", exc)
+            else:
+                logger.info("Campaign Firestore not configured: %s", exc.message)
+        except Exception as exc:
+            logger.warning("Campaign recovery skipped due to error: %s", exc)
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="campaign-runner")
         logger.info(
             "Campaign runner started | max_parallel_calls=%s | dispatch_interval_seconds=%s",
@@ -285,7 +289,11 @@ class CampaignRunnerService:
 
     async def _process_due_campaigns(self) -> None:
         try:
-            campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
+            campaigns = await run_in_threadpool(
+                self.campaign_repository.list_campaigns_by_statuses,
+                ["scheduled", "running"],
+                limit_per_status=self.settings.runner_query_limit,
+            )
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
@@ -310,8 +318,7 @@ class CampaignRunnerService:
                     payload={"source": "scheduler"},
                 )
 
-        running_campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
-        for campaign in running_campaigns:
+        for campaign in campaigns:
             if campaign.status == "running":
                 await self.process_campaign(campaign.campaign_id)
 
@@ -345,7 +352,11 @@ class CampaignRunnerService:
         return due_contacts[:limit]
 
     async def _recover_stale_dispatches(self) -> None:
-        campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
+        campaigns = await run_in_threadpool(
+            self.campaign_repository.list_campaigns_by_statuses,
+            ["running"],
+            limit_per_status=self.settings.runner_query_limit,
+        )
         now = utc_now()
         recovered = 0
 

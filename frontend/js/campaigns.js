@@ -47,6 +47,8 @@ let activeAgentDefaultPrompt = "";
 let instructionsEditedByOperator = false;
 let activeSearch = "";
 let activeStatus = "";
+let isCampaignsRefreshing = false;
+let isCampaignSchedulesRefreshing = false;
 
 function getFilterValue(fieldName) {
   const field = filtersForm.elements.namedItem(fieldName);
@@ -403,23 +405,42 @@ function collectCampaignPayload() {
   return payload;
 }
 
-async function loadCampaigns() {
-  renderTableLoading(tableBody, 7, "Loading campaigns...");
+async function loadCampaigns({ showLoading = true } = {}) {
+  if (isCampaignsRefreshing) {
+    return;
+  }
+  isCampaignsRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(tableBody, 7, "Loading campaigns...");
+  }
 
   try {
     allCampaigns = await campaignService.listCampaigns();
     renderCampaignRows(applyFilters(allCampaigns));
-    await loadCampaignSchedules();
+    await loadCampaignSchedules({ showLoading });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load campaigns.";
-    renderTableError(tableBody, 7, message);
+    if (showLoading) {
+      renderTableError(tableBody, 7, message);
+    }
+    showError(message);
+  } finally {
+    isCampaignsRefreshing = false;
   }
 }
 
-async function loadCampaignSchedules() {
-  renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
-  renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
-  clearMessage(campaignScheduleMessage);
+async function loadCampaignSchedules({ showLoading = true } = {}) {
+  if (isCampaignSchedulesRefreshing) {
+    return;
+  }
+  isCampaignSchedulesRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(campaignAiCallbackTableBody, 6, "Loading campaign AI callbacks...");
+    renderTableLoading(campaignExecutiveRequestTableBody, 7, "Loading campaign executive requests...");
+    clearMessage(campaignScheduleMessage);
+  }
 
   try {
     const scheduledCalls = await scheduledCallService.listScheduledCalls();
@@ -428,9 +449,14 @@ async function loadCampaignSchedules() {
     renderCampaignExecutiveRequests(campaignSchedules.filter((item) => item.type === "executive_callback"));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load campaign schedules.";
-    renderTableError(campaignAiCallbackTableBody, 6, message);
-    renderTableError(campaignExecutiveRequestTableBody, 7, message);
-    renderMessage(campaignScheduleMessage, "error", message);
+    if (showLoading) {
+      renderTableError(campaignAiCallbackTableBody, 6, message);
+      renderTableError(campaignExecutiveRequestTableBody, 7, message);
+      renderMessage(campaignScheduleMessage, "error", message);
+    }
+    showError(message);
+  } finally {
+    isCampaignSchedulesRefreshing = false;
   }
 }
 
@@ -550,7 +576,7 @@ async function handleCampaignAction(action, campaignId) {
       showSuccess("Campaign resumed.");
     }
 
-    await loadCampaigns();
+    await loadCampaigns({ showLoading: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Campaign action failed.";
     renderMessage(dashboardMessage, "error", message);
@@ -574,7 +600,7 @@ form.addEventListener("submit", async (event) => {
     toggleScheduledField();
     resetPreview();
     applySelectedAgentPrompt({ force: true });
-    await loadCampaigns();
+    await loadCampaigns({ showLoading: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create the campaign.";
     renderMessage(formMessage, "error", message);
@@ -650,7 +676,7 @@ tableBody.addEventListener("click", async (event) => {
 });
 
 refreshButton.addEventListener("click", async () => {
-  await loadCampaigns();
+  await loadCampaigns({ showLoading: true });
   showSuccess("Campaign list refreshed.");
 });
 
@@ -665,5 +691,5 @@ setSchedulingDateDefaults();
 toggleScheduledField();
 resetPreview();
 loadAgents();
-loadCampaigns();
-window.setInterval(loadCampaigns, frontendConfig.refreshIntervals.campaignsMs);
+loadCampaigns({ showLoading: true });
+window.setInterval(() => loadCampaigns({ showLoading: false }), frontendConfig.refreshIntervals.campaignsMs);

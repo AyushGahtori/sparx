@@ -27,6 +27,7 @@ const manualExecutiveRequestCount = document.getElementById("manual-executive-re
 
 let activeCallId = null;
 let pollTimer = null;
+let isManualSchedulesRefreshing = false;
 const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function renderMessage(type, message) {
@@ -131,9 +132,16 @@ function renderExecutiveRequests(items) {
     .join("");
 }
 
-async function loadManualSchedules() {
-  renderTableLoading(manualAiCallbackTableBody, 5, "Loading manual AI callbacks...");
-  renderTableLoading(manualExecutiveRequestTableBody, 6, "Loading manual executive requests...");
+async function loadManualSchedules({ showLoading = true } = {}) {
+  if (isManualSchedulesRefreshing) {
+    return;
+  }
+  isManualSchedulesRefreshing = true;
+
+  if (showLoading) {
+    renderTableLoading(manualAiCallbackTableBody, 5, "Loading manual AI callbacks...");
+    renderTableLoading(manualExecutiveRequestTableBody, 6, "Loading manual executive requests...");
+  }
 
   try {
     const scheduledCalls = await scheduledCallService.listScheduledCalls();
@@ -141,9 +149,13 @@ async function loadManualSchedules() {
     renderExecutiveRequests(scheduledCalls.filter((item) => item.type === "executive_callback" && isManualSchedule(item)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load manual scheduled calls.";
-    renderTableError(manualAiCallbackTableBody, 5, message);
-    renderTableError(manualExecutiveRequestTableBody, 6, message);
+    if (showLoading) {
+      renderTableError(manualAiCallbackTableBody, 5, message);
+      renderTableError(manualExecutiveRequestTableBody, 6, message);
+    }
     showError(message);
+  } finally {
+    isManualSchedulesRefreshing = false;
   }
 }
 
@@ -355,7 +367,7 @@ form.addEventListener("submit", async (event) => {
     showSuccess("Manual call started successfully.");
     startPolling(call.call_id);
     await refreshCallStatus();
-    await loadManualSchedules();
+    await loadManualSchedules({ showLoading: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the call.";
     renderMessage("error", message);
@@ -420,5 +432,5 @@ bootPage({
 applyPrefillFromQuery();
 setSchedulingDateDefaults();
 loadAgents();
-loadManualSchedules();
-window.setInterval(loadManualSchedules, frontendConfig.refreshIntervals.scheduledCallsMs);
+loadManualSchedules({ showLoading: true });
+window.setInterval(() => loadManualSchedules({ showLoading: false }), frontendConfig.refreshIntervals.scheduledCallsMs);

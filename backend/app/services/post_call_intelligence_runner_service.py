@@ -47,7 +47,11 @@ class PostCallIntelligenceRunnerService:
             await self._recover_incomplete_jobs()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                raise
+                logger.warning("Post-call intelligence recovery failed: %s", exc)
+            else:
+                logger.info("Post-call intelligence Firestore not configured: %s", exc.message)
+        except Exception as exc:
+            logger.warning("Post-call intelligence recovery skipped due to error: %s", exc)
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="post-call-intelligence-runner")
         logger.info(
             "Post-call intelligence runner started | max_parallel_jobs=%s | dispatch_interval_seconds=%s",
@@ -126,8 +130,9 @@ class PostCallIntelligenceRunnerService:
     async def _dispatch_queued_calls(self) -> None:
         try:
             queued_calls = await run_in_threadpool(
-                self.call_repository.list_calls,
-                ai_processing_status="queued",
+                self.call_repository.list_calls_by_ai_processing_statuses,
+                ["queued"],
+                limit_per_status=self.settings.runner_query_limit,
             )
         except AppError as exc:
             if exc.code == "firestore_not_configured":
@@ -191,8 +196,9 @@ class PostCallIntelligenceRunnerService:
 
     async def _recover_incomplete_jobs(self) -> None:
         calls = await run_in_threadpool(
-            self.call_repository.list_calls,
-            ai_processing_status="processing",
+            self.call_repository.list_calls_by_ai_processing_statuses,
+            ["processing"],
+            limit_per_status=self.settings.runner_query_limit,
         )
         for call_document in calls:
             await run_in_threadpool(

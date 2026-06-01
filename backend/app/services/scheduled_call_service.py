@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from starlette.concurrency import run_in_threadpool
 
+from app.config.settings import Settings, get_settings
 from app.core.errors import AppError
 from app.models.firestore_documents import ScheduledCallDocument
 from app.repositories.callback_repository import CallbackRepository, get_callback_repository
@@ -18,9 +19,11 @@ class ScheduledCallService:
     def __init__(
         self,
         *,
+        settings: Settings,
         scheduled_call_repository: ScheduledCallRepository,
         callback_repository: CallbackRepository,
     ) -> None:
+        self.settings = settings
         self.scheduled_call_repository = scheduled_call_repository
         self.callback_repository = callback_repository
 
@@ -34,6 +37,7 @@ class ScheduledCallService:
             self.scheduled_call_repository.list_scheduled_calls,
             type=type,
             status=None,
+            limit=self.settings.dashboard_list_limit,
         )
         responses = [await self._hydrate_status(scheduled_call) for scheduled_call in scheduled_calls]
         if status:
@@ -154,6 +158,7 @@ class ScheduledCallService:
 @lru_cache
 def get_scheduled_call_service() -> ScheduledCallService:
     return ScheduledCallService(
+        settings=get_settings(),
         scheduled_call_repository=get_scheduled_call_repository(),
         callback_repository=get_callback_repository(),
     )

@@ -47,18 +47,20 @@ class Settings(BaseSettings):
     campaign_csv_max_file_size_bytes: int = Field(default=2 * 1024 * 1024, alias="CAMPAIGN_CSV_MAX_FILE_SIZE_BYTES")
     campaign_csv_max_rows: int = Field(default=2000, alias="CAMPAIGN_CSV_MAX_ROWS")
     campaign_max_parallel_calls: int = Field(default=3, alias="CAMPAIGN_MAX_PARALLEL_CALLS")
-    campaign_dispatch_interval_seconds: int = Field(default=8, alias="CAMPAIGN_DISPATCH_INTERVAL_SECONDS")
+    campaign_dispatch_interval_seconds: int = Field(default=30, alias="CAMPAIGN_DISPATCH_INTERVAL_SECONDS")
     callback_default_timezone: str = Field(default="Asia/Kolkata", alias="CALLBACK_DEFAULT_TIMEZONE")
     callback_business_hour_start: int = Field(default=9, alias="CALLBACK_BUSINESS_HOUR_START")
     callback_business_hour_end: int = Field(default=19, alias="CALLBACK_BUSINESS_HOUR_END")
     callback_max_parallel_calls: int = Field(default=2, alias="CALLBACK_MAX_PARALLEL_CALLS")
-    callback_dispatch_interval_seconds: int = Field(default=10, alias="CALLBACK_DISPATCH_INTERVAL_SECONDS")
+    callback_dispatch_interval_seconds: int = Field(default=60, alias="CALLBACK_DISPATCH_INTERVAL_SECONDS")
     callback_duplicate_window_minutes: int = Field(default=60, alias="CALLBACK_DUPLICATE_WINDOW_MINUTES")
     gemma_model_name: str = Field(default="gemma-4-26b-a4b-it", alias="GEMMA_MODEL_NAME")
     gemma_request_timeout_seconds: int = Field(default=40, alias="GEMMA_REQUEST_TIMEOUT_SECONDS")
     gemma_max_retries: int = Field(default=2, alias="GEMMA_MAX_RETRIES")
     ai_max_parallel_jobs: int = Field(default=1, alias="AI_MAX_PARALLEL_JOBS")
-    ai_dispatch_interval_seconds: int = Field(default=6, alias="AI_DISPATCH_INTERVAL_SECONDS")
+    ai_dispatch_interval_seconds: int = Field(default=60, alias="AI_DISPATCH_INTERVAL_SECONDS")
+    runner_query_limit: int = Field(default=50, alias="RUNNER_QUERY_LIMIT")
+    dashboard_list_limit: int = Field(default=100, alias="DASHBOARD_LIST_LIMIT")
     cors_origins_raw: str = Field(
         default="http://127.0.0.1:5500,http://localhost:5500,http://127.0.0.1:8000,http://localhost:8000",
         alias="CORS_ORIGINS",
@@ -126,6 +128,10 @@ class Settings(BaseSettings):
             raise ValueError("AI_MAX_PARALLEL_JOBS must be at least 1.")
         if self.ai_dispatch_interval_seconds < 2:
             raise ValueError("AI_DISPATCH_INTERVAL_SECONDS must be at least 2 seconds.")
+        if self.runner_query_limit < 1:
+            raise ValueError("RUNNER_QUERY_LIMIT must be at least 1.")
+        if self.dashboard_list_limit < 1:
+            raise ValueError("DASHBOARD_LIST_LIMIT must be at least 1.")
         if self.public_tunnel_start_timeout_seconds < 5:
             raise ValueError("PUBLIC_TUNNEL_START_TIMEOUT_SECONDS must be at least 5 seconds.")
         if self.public_tunnel_health_timeout_seconds < 2:

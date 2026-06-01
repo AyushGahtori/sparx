@@ -314,7 +314,10 @@ class CallService:
         return self._to_response(call_document)
 
     async def list_calls(self) -> list[CallResponse]:
-        call_documents = await run_in_threadpool(self.call_repository.list_calls)
+        call_documents = await run_in_threadpool(
+            self.call_repository.list_calls,
+            limit=self.settings.dashboard_list_limit,
+        )
         return [self._to_response(call_document) for call_document in call_documents]
 
     async def delete_call(self, call_id: str) -> CallDeleteResponse:
