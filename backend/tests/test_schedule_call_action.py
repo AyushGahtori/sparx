@@ -48,6 +48,38 @@ class FakeCallbackService:
         return self.response
 
 
+class FakeGoogleCalendarService:
+    def __init__(self, *, should_fail: bool = False) -> None:
+        self.should_fail = should_fail
+        self.payloads = []
+
+    def create_meet_invite(self, **kwargs):
+        self.payloads.append(kwargs)
+        if self.should_fail:
+            return type(
+                "InviteResult",
+                (),
+                {
+                    "event_id": None,
+                    "meet_link": None,
+                    "event_link": None,
+                    "invite_email_status": "failed",
+                    "error": "Calendar unavailable",
+                },
+            )()
+        return type(
+            "InviteResult",
+            (),
+            {
+                "event_id": "google_event_123",
+                "meet_link": "https://meet.google.com/abc-defg-hij",
+                "event_link": "https://calendar.google.com/event?eid=123",
+                "invite_email_status": "sent",
+                "error": None,
+            },
+        )()
+
+
 def build_callback_response(scheduled_time: datetime) -> CallbackResponse:
     return CallbackResponse(
         callback_id="callback_test",
@@ -87,13 +119,14 @@ def build_callback_document(scheduled_time: datetime) -> CallbackDocument:
     )
 
 
-def build_action(callback_time: datetime) -> ScheduleCallAction:
+def build_action(callback_time: datetime, google_calendar_service=None) -> ScheduleCallAction:
     callback_response = build_callback_response(callback_time)
     return ScheduleCallAction(
         settings=Settings(_env_file=None),
         scheduled_call_repository=FakeScheduledCallRepository(),
         callback_repository=FakeCallbackRepository(build_callback_document(callback_time)),
         callback_service=FakeCallbackService(callback_response),
+        google_calendar_service=google_calendar_service or FakeGoogleCalendarService(),
     )
 
 
@@ -120,6 +153,8 @@ async def test_schedule_call_action_creates_executive_request_without_callback()
     assert result.call_id == "call_123"
     assert result.call_type == "campaign"
     assert result.campaign_id == "campaign_123"
+    assert result.communication_mode == "phone_call"
+    assert result.invite_email_status == "not_required"
 
 
 @pytest.mark.asyncio
@@ -150,3 +185,57 @@ async def test_schedule_call_action_creates_ai_callback_record():
     assert action.callback_service.payloads[0].contact_id == "contact_456"
     assert action.callback_service.payloads[0].source == "campaign"
     assert action.callback_service.payloads[0].requested_time_raw == "2026-06-15T14:30:00"
+
+
+@pytest.mark.asyncio
+async def test_schedule_call_action_creates_google_meet_request_with_invite_fields():
+    google_service = FakeGoogleCalendarService()
+    action = build_action(datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc), google_service)
+
+    result = await action.execute(
+        ScheduleCallActionRequest(
+            type="executive_callback",
+            name="Customer Name",
+            phone="+919999999999",
+            scheduled_time=datetime(2026, 6, 15, 14, 30),
+            timezone="Asia/Kolkata",
+            call_id="call_789",
+            communication_mode="google_meet",
+            attendee_email="customer at gmail dot com",
+        )
+    )
+
+    assert result.type == "executive_callback"
+    assert result.communication_mode == "google_meet"
+    assert result.attendee_email == "customer@gmail.com"
+    assert result.google_meet_link == "https://meet.google.com/abc-defg-hij"
+    assert result.google_calendar_event_id == "google_event_123"
+    assert result.google_calendar_event_link == "https://calendar.google.com/event?eid=123"
+    assert result.invite_email_status == "sent"
+    assert google_service.payloads[0]["attendee_email"] == "customer@gmail.com"
+
+
+@pytest.mark.asyncio
+async def test_schedule_call_action_keeps_executive_request_when_google_invite_fails():
+    action = build_action(
+        datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
+        FakeGoogleCalendarService(should_fail=True),
+    )
+
+    result = await action.execute(
+        ScheduleCallActionRequest(
+            type="executive_callback",
+            name="Customer Name",
+            phone="+919999999999",
+            scheduled_time=datetime(2026, 6, 15, 14, 30),
+            communication_mode="google_meet",
+            attendee_email="customer@gmail.com",
+        )
+    )
+
+    assert result.status == "scheduled"
+    assert result.communication_mode == "google_meet"
+    assert result.google_meet_link is None
+    assert result.invite_email_status == "failed"
+    assert result.invite_error == "Calendar unavailable"
+    assert "normal executive call" in result.metadata["agent_message"]

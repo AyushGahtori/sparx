@@ -1,13 +1,16 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.utils.phone import normalize_phone_number
+from app.utils.email import is_valid_email, normalize_spoken_email
 
 
 ScheduledCallType = Literal["ai_callback", "executive_callback"]
 ScheduledCallOrigin = Literal["individual", "campaign"]
+CommunicationMode = Literal["phone_call", "google_meet"]
+InviteEmailStatus = Literal["not_required", "pending", "sent", "failed"]
 ScheduledCallStatus = Literal[
     "scheduled",
     "queued",
@@ -36,6 +39,8 @@ class ScheduleCallActionRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
     requested_time_raw: str | None = Field(default=None, max_length=200)
     assigned_executive: str | None = Field(default=None, max_length=120)
+    communication_mode: CommunicationMode = "phone_call"
+    attendee_email: str | None = Field(default=None, max_length=254)
     call_id: str | None = Field(default=None, max_length=120)
     call_type: ScheduledCallOrigin | None = None
     campaign_id: str | None = Field(default=None, max_length=120)
@@ -52,6 +57,23 @@ class ScheduleCallActionRequest(BaseModel):
     def validate_phone(cls, value: str) -> str:
         return normalize_phone_number(value)
 
+    @field_validator("attendee_email")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        normalized = normalize_spoken_email(value)
+        if normalized and not is_valid_email(normalized):
+            raise ValueError("A valid attendee email is required for Google Meet scheduling.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_google_meet_request(self) -> "ScheduleCallActionRequest":
+        if self.communication_mode == "google_meet":
+            if self.type != "executive_callback":
+                raise ValueError("Google Meet scheduling is only available for executive callback requests.")
+            if not self.attendee_email:
+                raise ValueError("Attendee email is required for Google Meet scheduling.")
+        return self
+
 
 class ScheduledCallResponse(BaseModel):
     scheduled_call_id: str
@@ -67,6 +89,13 @@ class ScheduledCallResponse(BaseModel):
     campaign_id: str | None = None
     contact_id: str | None = None
     assigned_executive: str | None = None
+    communication_mode: CommunicationMode = "phone_call"
+    attendee_email: str | None = None
+    google_meet_link: str | None = None
+    google_calendar_event_id: str | None = None
+    google_calendar_event_link: str | None = None
+    invite_email_status: InviteEmailStatus = "not_required"
+    invite_error: str | None = None
     requested_time_raw: str | None = None
     notes: str | None = None
     source: str

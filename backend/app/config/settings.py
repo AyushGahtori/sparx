@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     mongodb_fallback_enabled: bool = Field(default=False, alias="MONGODB_FALLBACK_ENABLED")
     mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
     mongodb_database: str | None = Field(default=None, alias="MONGODB_DATABASE")
+    google_calendar_enabled: bool = Field(default=False, alias="GOOGLE_CALENDAR_ENABLED")
+    google_oauth_client_secrets_path: str | None = Field(default=None, alias="GOOGLE_OAUTH_CLIENT_SECRETS_PATH")
+    google_oauth_token_path: str = Field(default="google-calendar-token.json", alias="GOOGLE_OAUTH_TOKEN_PATH")
+    google_calendar_id: str = Field(default="primary", alias="GOOGLE_CALENDAR_ID")
+    google_meet_event_duration_minutes: int = Field(default=30, alias="GOOGLE_MEET_EVENT_DURATION_MINUTES")
     cors_origins_raw: str = Field(
         default="http://127.0.0.1:5500,http://localhost:5500,http://127.0.0.1:8000,http://localhost:8000",
         alias="CORS_ORIGINS",
@@ -143,6 +148,12 @@ class Settings(BaseSettings):
             raise ValueError("DASHBOARD_LIST_LIMIT must be at least 1.")
         if self.mongodb_fallback_enabled and (not self.mongodb_uri or not self.mongodb_database):
             raise ValueError("MongoDB fallback requires MONGODB_URI and MONGODB_DATABASE.")
+        if self.google_meet_event_duration_minutes < 5:
+            raise ValueError("GOOGLE_MEET_EVENT_DURATION_MINUTES must be at least 5 minutes.")
+        if self.google_calendar_enabled and not self.google_oauth_client_secrets_file:
+            raise ValueError("GOOGLE_OAUTH_CLIENT_SECRETS_PATH is required when GOOGLE_CALENDAR_ENABLED=true.")
+        if self.google_calendar_enabled and not self.google_oauth_token_file:
+            raise ValueError("GOOGLE_OAUTH_TOKEN_PATH is required when GOOGLE_CALENDAR_ENABLED=true.")
         if self.public_tunnel_start_timeout_seconds < 5:
             raise ValueError("PUBLIC_TUNNEL_START_TIMEOUT_SECONDS must be at least 5 seconds.")
         if self.public_tunnel_health_timeout_seconds < 2:
@@ -217,6 +228,24 @@ class Settings(BaseSettings):
     @property
     def agents_config_file(self) -> Path:
         return (self.backend_dir / self.agents_config_path).resolve()
+
+    @property
+    def google_oauth_client_secrets_file(self) -> Path | None:
+        if not self.google_oauth_client_secrets_path:
+            return None
+        candidate = Path(self.google_oauth_client_secrets_path.strip()).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        return (self.backend_dir / candidate).resolve()
+
+    @property
+    def google_oauth_token_file(self) -> Path | None:
+        if not self.google_oauth_token_path:
+            return None
+        candidate = Path(self.google_oauth_token_path.strip()).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        return (self.backend_dir / candidate).resolve()
 
     @property
     def cloudflared_executable_file(self) -> Path:

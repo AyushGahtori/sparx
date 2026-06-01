@@ -28,3 +28,5 @@ tools/cloudflared.*.log
 *firebase-adminsdk*.json
 serviceAccount*.json
 service-account*.json
+google-oauth-client-secrets*.json
+google-calendar-token*.json

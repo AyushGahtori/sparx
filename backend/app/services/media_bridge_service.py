@@ -453,6 +453,10 @@ class MediaBridgeService:
                     "scheduled_call_id": result.scheduled_call_id,
                     "type": result.type,
                     "scheduled_time": result.scheduled_time.isoformat(),
+                    "communication_mode": result.communication_mode,
+                    "attendee_email": result.attendee_email,
+                    "google_meet_link": result.google_meet_link,
+                    "invite_email_status": result.invite_email_status,
                 },
             )
             return self._build_function_response(
@@ -623,13 +627,21 @@ class MediaBridgeService:
                 "When a customer asks for a callback, says this is not a good time, or requests to speak "
                 "with a real person, collect a clear date and time if needed. After the customer confirms "
                 f"the time, call {ScheduleCallAction.name}. Use ai_callback for automated AI callbacks "
-                "and executive_callback for human executive or sales-team requests. Do not rely on a "
-                "spoken promise alone for scheduling. You already know the current call's phone number "
-                "from the call context, so do not ask the customer for their number. Instead, confirm "
-                "the existing number naturally, for example: 'Is this number okay for our executive to "
-                "call at 3:30 PM?' If the requested time is outside the scheduling limits in the call "
-                "context, do not call the action. Politely explain that the time is outside the allowed "
-                "window and ask for another date or time that fits the listed limits."
+                "and executive_callback for human executive or sales-team requests. For executive_callback, "
+                "ask the customer which communication mode they prefer: a normal phone call on this number "
+                "or a Google Meet link by email. If they choose a normal call, use communication_mode "
+                "phone_call. If they choose Google Meet, ask them to spell their Gmail address, normalize "
+                "spoken words like 'at' and 'dot', repeat the full email letter by letter, and only call "
+                f"{ScheduleCallAction.name} with communication_mode google_meet and attendee_email after "
+                "they confirm it is correct. After a Google Meet action succeeds, ask if they received the "
+                "invite. If they say no, tell them it can take a few minutes, ask them to check spam/all "
+                "mail, and explain that a normal executive call is also scheduled as fallback. Do not rely "
+                "on a spoken promise alone for scheduling. You already know the current call's phone number "
+                "from the call context, so do not ask the customer for their number. Instead, confirm the "
+                "existing number naturally, for example: 'Is this number okay for our executive to call at "
+                "3:30 PM?' If the requested time is outside the scheduling limits in the call context, do "
+                "not call the action. Politely explain that the time is outside the allowed window and ask "
+                "for another date or time that fits the listed limits."
             ).strip()
         else:
             think["prompt"] = prompt
