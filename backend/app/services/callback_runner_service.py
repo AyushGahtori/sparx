@@ -11,7 +11,7 @@ from app.repositories.callback_repository import CallbackRepository, get_callbac
 from app.schemas.callback import CallbackResponse
 from app.services.call_service import CallService, get_call_service
 from app.services.callback_sync_service import CallbackSyncService, get_callback_sync_service
-from app.utils.time import format_uptime, utc_now, utc_now_iso
+from app.utils.time import coerce_utc, format_uptime, utc_now, utc_now_iso
 
 logger = get_logger(__name__)
 
@@ -49,11 +49,7 @@ class CallbackRunnerService:
             await self._recover_stale_callbacks()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                logger.warning("Callback recovery failed: %s", exc)
-            else:
-                logger.info("Callback Firestore not configured: %s", exc.message)
-        except Exception as exc:
-            logger.warning("Callback recovery skipped due to error: %s", exc)
+                raise
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="callback-runner")
         logger.info(
             "Callback runner started | max_parallel_calls=%s | dispatch_interval_seconds=%s",
@@ -129,32 +125,24 @@ class CallbackRunnerService:
 
     async def _process_due_callbacks(self) -> None:
         try:
-            active_callbacks = await run_in_threadpool(
-                self.callback_repository.list_callbacks_by_statuses,
-                list(self.active_statuses),
-                limit_per_status=self.settings.runner_query_limit,
-            )
-            due_callbacks = await run_in_threadpool(
-                self.callback_repository.list_callbacks_by_statuses,
-                list(self.runnable_statuses),
-                limit_per_status=self.settings.runner_query_limit,
-            )
+            callbacks = await run_in_threadpool(self.callback_repository.list_callbacks)
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
             raise
 
-        now = utc_now()
-        due_callbacks = [
-            callback
-            for callback in due_callbacks
-            if callback.normalized_callback_time <= now
-        ]
-        active_count = len(active_callbacks)
+        active_count = len([callback for callback in callbacks if callback.status in self.active_statuses])
         remaining_capacity = max(self.settings.callback_max_parallel_calls - active_count, 0)
         if remaining_capacity == 0:
             return
 
+        now = utc_now()
+        due_callbacks = [
+            callback
+            for callback in callbacks
+            if callback.status in self.runnable_statuses
+            and coerce_utc(callback.normalized_callback_time) <= now
+        ]
         due_callbacks.sort(key=self._callback_sort_key)
 
         for callback_document in due_callbacks[:remaining_capacity]:
@@ -197,21 +185,19 @@ class CallbackRunnerService:
             )
 
     async def _recover_stale_callbacks(self) -> None:
-        callbacks = await run_in_threadpool(
-            self.callback_repository.list_callbacks_by_statuses,
-            list(self.active_statuses),
-            limit_per_status=self.settings.runner_query_limit,
-        )
+        callbacks = await run_in_threadpool(self.callback_repository.list_callbacks)
         now = utc_now()
         recovered = 0
 
         for callback_document in callbacks:
+            if callback_document.status not in self.active_statuses:
+                continue
 
             last_attempted_at = callback_document.last_attempted_at or callback_document.updated_at or callback_document.created_at
             if last_attempted_at is None:
                 continue
 
-            age_seconds = (now - last_attempted_at).total_seconds()
+            age_seconds = (now - coerce_utc(last_attempted_at)).total_seconds()
             if age_seconds < self.settings.queue_recovery_stale_seconds:
                 continue
 
@@ -235,6 +221,17 @@ class CallbackRunnerService:
         self._recovered_callbacks += recovered
 
     def get_diagnostics(self) -> dict[str, object]:
+        if not self.settings.resolved_run_callback_dispatch_runner:
+            return {
+                "status": "disabled",
+                "loop_running": False,
+                "active_items": 0,
+                "last_cycle_started_at": self._last_cycle_started_at,
+                "last_cycle_completed_at": self._last_cycle_completed_at,
+                "recovered_items": self._recovered_callbacks,
+                "last_error": None,
+                "uptime": format_uptime(self._started_at),
+            }
         active_items = 0
         if self._loop_task and not self._loop_task.done():
             active_items = 1
@@ -255,8 +252,8 @@ class CallbackRunnerService:
         priority_order = {"high": 0, "medium": 1, "low": 2}
         return (
             priority_order[callback_document.priority],
-            callback_document.normalized_callback_time,
-            callback_document.created_at or utc_now(),
+            coerce_utc(callback_document.normalized_callback_time),
+            coerce_utc(callback_document.created_at or utc_now()),
         )
 
     @staticmethod

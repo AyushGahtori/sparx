@@ -1,4 +1,7 @@
+import { indiaDateInputToIso } from "./formatter.js";
+
 const phonePattern = /^\+[1-9]\d{7,14}$/;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function collectFormValues(form) {
   const formData = new FormData(form);
@@ -7,6 +10,10 @@ export function collectFormValues(form) {
 
 export function validatePhoneE164(phone) {
   return phonePattern.test(String(phone || "").trim());
+}
+
+export function validateEmail(email) {
+  return emailPattern.test(String(email || "").trim());
 }
 
 export function requireFields(payload, requiredFieldMap) {
@@ -33,15 +40,9 @@ export function normalizeOptionalString(value) {
 }
 
 export function toIsoRangeStart(value) {
-  if (!value) {
-    return undefined;
-  }
-  return new Date(`${value}T00:00:00`).toISOString();
+  return indiaDateInputToIso(value, false);
 }
 
 export function toIsoRangeEnd(value) {
-  if (!value) {
-    return undefined;
-  }
-  return new Date(`${value}T23:59:59`).toISOString();
+  return indiaDateInputToIso(value, true);
 }

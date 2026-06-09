@@ -1,5 +1,6 @@
 import { frontendConfig } from "../config.js";
 import { buildQueryString } from "../router.js";
+import { getFirebaseIdToken, isAuthEnabled, redirectToLogin, waitForAuthReady } from "./auth.js";
 
 class ApiError extends Error {
   constructor(message, options = {}) {
@@ -44,6 +45,10 @@ class ApiService {
     return this.request("DELETE", path);
   }
 
+  async getBlob(path, params) {
+    return this.requestBlob("GET", path, { params });
+  }
+
   async request(method, path, options = {}) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), this.timeoutMs);
@@ -51,10 +56,21 @@ class ApiService {
     const url = `${this.baseUrl}${path}${query ? `?${query}` : ""}`;
 
     try {
+      await waitForAuthReady();
+      const authorizationToken = isAuthEnabled() ? await getFirebaseIdToken() : null;
+      if (frontendConfig.auth.required && !authorizationToken) {
+        redirectToLogin();
+        throw new ApiError("Please sign in to continue.", {
+          status: 401,
+          code: "auth_required",
+        });
+      }
+
       const response = await fetch(url, {
         method,
         headers: {
           Accept: "application/json",
+          ...(authorizationToken ? { Authorization: `Bearer ${authorizationToken}` } : {}),
           ...(options.headers || {}),
         },
         body: options.body,
@@ -80,6 +96,9 @@ class ApiService {
           payload?.detail?.[0]?.msg ||
           payload?.detail ||
           `Request failed with status ${response.status}.`;
+        if (response.status === 401 && frontendConfig.auth.enabled) {
+          redirectToLogin();
+        }
         throw new ApiError(String(apiMessage), {
           status: response.status,
           code: payload?.error_code || "http_error",
@@ -93,6 +112,65 @@ class ApiService {
       }
 
       return payload;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new ApiError("The request timed out. Please try again.", {
+          code: "request_timeout",
+        });
+      }
+      if (error instanceof TypeError) {
+        throw new ApiError("Unable to connect. Please try again.", {
+          code: "network_error",
+        });
+      }
+      throw error instanceof ApiError ? error : new ApiError(error.message || "Unexpected request failure.");
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  async requestBlob(method, path, options = {}) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), this.timeoutMs);
+    const query = options.params ? buildQueryString(options.params) : "";
+    const url = `${this.baseUrl}${path}${query ? `?${query}` : ""}`;
+
+    try {
+      await waitForAuthReady();
+      const authorizationToken = isAuthEnabled() ? await getFirebaseIdToken() : null;
+      if (frontendConfig.auth.required && !authorizationToken) {
+        redirectToLogin();
+        throw new ApiError("Please sign in to continue.", {
+          status: 401,
+          code: "auth_required",
+        });
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          Accept: "audio/*",
+          ...(authorizationToken ? { Authorization: `Bearer ${authorizationToken}` } : {}),
+          ...(options.headers || {}),
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        let message = `Request failed with status ${response.status}.`;
+        try {
+          const payload = await response.json();
+          message = payload?.error || payload?.detail || message;
+        } catch {
+          // Audio endpoints may return non-JSON error bodies from infrastructure.
+        }
+        throw new ApiError(String(message), {
+          status: response.status,
+          code: "http_error",
+        });
+      }
+
+      return await response.blob();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw new ApiError("The request timed out. Please try again.", {

@@ -27,9 +27,10 @@ class RetryService:
                 backoff_seconds=0,
             )
 
+        max_auto_calls = self.settings.call_max_auto_calls
         next_retry_count = current_retry_count + 1
 
-        if next_retry_count <= self.settings.call_max_auto_calls:
+        if next_retry_count <= max_auto_calls:
             next_retry_time = reference_time + timedelta(minutes=self.settings.call_retry_interval_minutes)
             return RetryDecision(
                 retry_count=next_retry_count,
@@ -39,8 +40,8 @@ class RetryService:
             )
 
         return RetryDecision(
-            retry_count=current_retry_count,
+            retry_count=min(current_retry_count, max_auto_calls),
             next_retry_time=None,
-            final_status="permanently_failed",
+            final_status="not_interested",
             backoff_seconds=0,
         )

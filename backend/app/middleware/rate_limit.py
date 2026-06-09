@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import Settings
 from app.core.responses import build_error_payload
+from app.utils.network import resolve_client_ip
 
 
 @dataclass(frozen=True)
@@ -113,9 +114,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _resolve_client_identifier(request: Request) -> str:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        if request.client is not None:
-            return request.client.host
-        return "unknown"
+        settings: Settings | None = getattr(request.app.state, "settings", None)
+        return resolve_client_ip(
+            request,
+            trust_proxy_headers=bool(settings and settings.trust_proxy_headers),
+        )

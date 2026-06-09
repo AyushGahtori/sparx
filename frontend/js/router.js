@@ -3,9 +3,10 @@ const PAGE_MAP = Object.freeze({
   dashboard: { key: "dashboard", label: "Dashboard", path: "pages/dashboard.html" },
   "manual-call": { key: "manual-call", label: "Manual Call", path: "pages/manual-call.html" },
   campaigns: { key: "campaigns", label: "Campaigns", path: "pages/campaigns.html" },
-  "scheduled-calls": { key: "scheduled-calls", label: "Scheduled Calls", path: "pages/scheduled-calls.html" },
   callbacks: { key: "callbacks", label: "Callbacks", path: "pages/callbacks.html" },
+  "meeting-details": { key: "meeting-details", label: "Meeting Details", path: "pages/meeting-details.html" },
   "call-history": { key: "call-history", label: "Call History", path: "pages/call-history.html" },
+  "call-recordings": { key: "call-recordings", label: "Call Recording", path: "pages/call-recordings.html" },
   summaries: { key: "summaries", label: "Summaries", path: "pages/summaries.html" },
   settings: { key: "settings", label: "Diagnostics", path: "pages/settings.html" },
 });
@@ -14,9 +15,10 @@ const SIDEBAR_ITEMS = Object.freeze([
   PAGE_MAP.dashboard,
   PAGE_MAP["manual-call"],
   PAGE_MAP.campaigns,
-  PAGE_MAP["scheduled-calls"],
   PAGE_MAP.callbacks,
+  PAGE_MAP["meeting-details"],
   PAGE_MAP["call-history"],
+  PAGE_MAP["call-recordings"],
   PAGE_MAP.summaries,
   PAGE_MAP.settings,
 ]);

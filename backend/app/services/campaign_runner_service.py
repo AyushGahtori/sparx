@@ -55,11 +55,7 @@ class CampaignRunnerService:
             await self._recover_stale_dispatches()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                logger.warning("Campaign recovery failed: %s", exc)
-            else:
-                logger.info("Campaign Firestore not configured: %s", exc.message)
-        except Exception as exc:
-            logger.warning("Campaign recovery skipped due to error: %s", exc)
+                raise
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="campaign-runner")
         logger.info(
             "Campaign runner started | max_parallel_calls=%s | dispatch_interval_seconds=%s",
@@ -107,7 +103,11 @@ class CampaignRunnerService:
             campaign_id,
             event_type="campaign_started",
             message="Campaign execution was started.",
-            payload={"source": "api"},
+            payload={
+                "source": "api",
+                "dispatch_mode": self._resolve_dispatch_mode(campaign),
+                "max_parallel_calls": self._resolve_parallel_call_limit(campaign),
+            },
         )
         await self.process_campaign(campaign_id)
         self.kick()
@@ -153,7 +153,11 @@ class CampaignRunnerService:
             campaign_id,
             event_type="campaign_resumed",
             message="Campaign execution resumed.",
-            payload={"source": "api"},
+            payload={
+                "source": "api",
+                "dispatch_mode": self._resolve_dispatch_mode(campaign),
+                "max_parallel_calls": self._resolve_parallel_call_limit(campaign),
+            },
         )
         await self.process_campaign(campaign_id)
         self.kick()
@@ -192,7 +196,7 @@ class CampaignRunnerService:
 
         contacts = await run_in_threadpool(self.contact_repository.list_contacts_by_campaign, campaign_id)
         active_contacts = [contact for contact in contacts if contact.status in self.active_contact_statuses]
-        remaining_capacity = max(self.settings.campaign_max_parallel_calls - len(active_contacts), 0)
+        remaining_capacity = max(self._resolve_parallel_call_limit(campaign) - len(active_contacts), 0)
         if remaining_capacity == 0:
             return await self.sync_service.refresh_campaign_metrics(campaign_id)
 
@@ -218,7 +222,7 @@ class CampaignRunnerService:
         await run_in_threadpool(
             self.contact_repository.update_contact,
             contact.contact_id,
-            {"status": "dispatching"},
+            {"status": "dispatching", "last_attempted_at": utc_now()},
         )
         await self.sync_service.append_contact_event(
             contact.contact_id,
@@ -289,11 +293,7 @@ class CampaignRunnerService:
 
     async def _process_due_campaigns(self) -> None:
         try:
-            campaigns = await run_in_threadpool(
-                self.campaign_repository.list_campaigns_by_statuses,
-                ["scheduled", "running"],
-                limit_per_status=self.settings.runner_query_limit,
-            )
+            campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
@@ -315,10 +315,15 @@ class CampaignRunnerService:
                     campaign.campaign_id,
                     event_type="campaign_started",
                     message="Campaign started automatically at its scheduled time.",
-                    payload={"source": "scheduler"},
+                    payload={
+                        "source": "scheduler",
+                        "dispatch_mode": self._resolve_dispatch_mode(campaign),
+                        "max_parallel_calls": self._resolve_parallel_call_limit(campaign),
+                    },
                 )
 
-        for campaign in campaigns:
+        running_campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
+        for campaign in running_campaigns:
             if campaign.status == "running":
                 await self.process_campaign(campaign.campaign_id)
 
@@ -346,17 +351,22 @@ class CampaignRunnerService:
             contact
             for contact in contacts
             if contact.status in self.runnable_contact_statuses
-            and (contact.next_retry_time is None or contact.next_retry_time <= now)
+            and (contact.next_retry_time is None or coerce_utc(contact.next_retry_time) <= now)
         ]
-        due_contacts.sort(key=lambda contact: contact.next_retry_time or contact.created_at or now)
+        due_contacts.sort(key=lambda contact: coerce_utc(contact.next_retry_time or contact.created_at or now))
         return due_contacts[:limit]
 
+    @staticmethod
+    def _resolve_dispatch_mode(campaign: CampaignDocument) -> str:
+        return campaign.dispatch_mode if campaign.dispatch_mode in {"parallel", "one_by_one"} else "parallel"
+
+    def _resolve_parallel_call_limit(self, campaign: CampaignDocument) -> int:
+        if self._resolve_dispatch_mode(campaign) == "one_by_one":
+            return 1
+        return self.settings.campaign_max_parallel_calls
+
     async def _recover_stale_dispatches(self) -> None:
-        campaigns = await run_in_threadpool(
-            self.campaign_repository.list_campaigns_by_statuses,
-            ["running"],
-            limit_per_status=self.settings.runner_query_limit,
-        )
+        campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
         now = utc_now()
         recovered = 0
 
@@ -370,7 +380,7 @@ class CampaignRunnerService:
                 if last_attempted_at is None:
                     continue
 
-                age_seconds = (now - last_attempted_at).total_seconds()
+                age_seconds = (now - coerce_utc(last_attempted_at)).total_seconds()
                 if age_seconds < self.settings.queue_recovery_stale_seconds:
                     continue
 
@@ -391,6 +401,16 @@ class CampaignRunnerService:
         self._recovered_contacts += recovered
 
     def get_diagnostics(self) -> dict[str, object]:
+        if not self.settings.resolved_run_campaign_dispatch_runner:
+            return {
+                "status": "disabled",
+                "loop_running": False,
+                "active_items": 0,
+                "last_cycle_started_at": self._last_cycle_started_at,
+                "last_cycle_completed_at": self._last_cycle_completed_at,
+                "recovered_items": self._recovered_contacts,
+                "last_error": None,
+            }
         status = "healthy" if self._loop_task and not self._loop_task.done() and self._last_error is None else "degraded"
         return {
             "status": status,

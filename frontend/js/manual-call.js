@@ -1,16 +1,13 @@
 import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
-import { confirmDialog } from "./components/modal.js";
-import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
-import { callService } from "./services/callService.js?v=operator-complete";
-import { scheduledCallService } from "./services/scheduledCallService.js?v=manual-schedules";
+import { callService } from "./services/callService.js";
 import { getSearchParam } from "./router.js";
 import {
   escapeHtml,
   formatDateTime,
   formatStatusLabel,
 } from "./utils/formatter.js";
-import { collectFormValues, requireFields, validatePhoneE164 } from "./utils/validation.js";
+import { collectFormValues, requireFields, validateEmail, validatePhoneE164 } from "./utils/validation.js";
 import { showError, showInfo, showSuccess } from "./utils/notifications.js";
 
 const form = document.getElementById("manual-call-form");
@@ -18,17 +15,9 @@ const formMessage = document.getElementById("form-message");
 const statusPanel = document.getElementById("call-status-panel");
 const submitButton = document.getElementById("submit-button");
 const agentSelect = document.getElementById("agent-id");
-const aiCallbackMaxDateInput = document.getElementById("ai-callback-max-date");
-const executiveCallbackMaxDateInput = document.getElementById("executive-callback-max-date");
-const manualAiCallbackTableBody = document.getElementById("manual-ai-callback-table-body");
-const manualExecutiveRequestTableBody = document.getElementById("manual-executive-request-table-body");
-const manualAiCallbackCount = document.getElementById("manual-ai-callback-count");
-const manualExecutiveRequestCount = document.getElementById("manual-executive-request-count");
 
 let activeCallId = null;
 let pollTimer = null;
-let isManualSchedulesRefreshing = false;
-const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function renderMessage(type, message) {
   formMessage.innerHTML = `<div class="alert ${type}">${escapeHtml(message)}</div>`;
@@ -43,128 +32,18 @@ function setLoadingState(isLoading) {
   submitButton.textContent = isLoading ? "Starting AI Call..." : "Start AI Call";
 }
 
-function toDateInputValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function dateDaysFromNow(days) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return toDateInputValue(date);
-}
-
-function setSchedulingDateDefaults() {
-  const today = toDateInputValue(new Date());
-  const defaultMaxDate = dateDaysFromNow(30);
-  [aiCallbackMaxDateInput, executiveCallbackMaxDateInput].forEach((input) => {
-    input.min = today;
-    if (!input.value) {
-      input.value = defaultMaxDate;
-    }
-  });
-}
-
-function isManualSchedule(item) {
-  return item.call_type !== "campaign" && !item.campaign_id;
-}
-
-function formatScheduledDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Not available";
-  }
-  return date.toLocaleDateString();
-}
-
-function formatScheduledTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Not available";
-  }
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function renderAiCallbacks(items) {
-  manualAiCallbackCount.textContent = String(items.length);
-  if (!items.length) {
-    renderTableEmpty(manualAiCallbackTableBody, 5, "No manual AI callbacks have been scheduled yet.");
-    return;
-  }
-
-  manualAiCallbackTableBody.innerHTML = items
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(item.phone)}</td>
-          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
-          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
-          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
-        </tr>
-      `,
-    )
-    .join("");
-}
-
-function renderExecutiveRequests(items) {
-  manualExecutiveRequestCount.textContent = String(items.length);
-  if (!items.length) {
-    renderTableEmpty(manualExecutiveRequestTableBody, 6, "No manual executive call requests have been scheduled yet.");
-    return;
-  }
-
-  manualExecutiveRequestTableBody.innerHTML = items
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(item.phone)}</td>
-          <td>${escapeHtml(formatScheduledDate(item.scheduled_time))}</td>
-          <td>${escapeHtml(formatScheduledTime(item.scheduled_time))}</td>
-          <td><span class="status-pill ${escapeHtml(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></td>
-          <td>${escapeHtml(item.assigned_executive || "Unassigned")}</td>
-        </tr>
-      `,
-    )
-    .join("");
-}
-
-async function loadManualSchedules({ showLoading = true } = {}) {
-  if (isManualSchedulesRefreshing) {
-    return;
-  }
-  isManualSchedulesRefreshing = true;
-
-  if (showLoading) {
-    renderTableLoading(manualAiCallbackTableBody, 5, "Loading manual AI callbacks...");
-    renderTableLoading(manualExecutiveRequestTableBody, 6, "Loading manual executive requests...");
-  }
-
-  try {
-    const scheduledCalls = await scheduledCallService.listScheduledCalls();
-    renderAiCallbacks(scheduledCalls.filter((item) => item.type === "ai_callback" && isManualSchedule(item)));
-    renderExecutiveRequests(scheduledCalls.filter((item) => item.type === "executive_callback" && isManualSchedule(item)));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load manual scheduled calls.";
-    if (showLoading) {
-      renderTableError(manualAiCallbackTableBody, 5, message);
-      renderTableError(manualExecutiveRequestTableBody, 6, message);
-    }
-    showError(message);
-  } finally {
-    isManualSchedulesRefreshing = false;
-  }
-}
-
 function buildStatusMarkup(call) {
   const retryTime = call.next_retry_time ? formatDateTime(call.next_retry_time) : "Not scheduled";
   const startedAt = call.started_at ? formatDateTime(call.started_at) : "Not started";
   const endedAt = call.ended_at ? formatDateTime(call.ended_at) : "In progress";
   const summary = call.summary || call.ai_error || "Post-call intelligence is not available yet.";
-  const canMarkCompleted = ACTIVE_CALL_STATUSES.includes(call.status);
+  const meetingInvite = call.metadata?.meeting_invite || {};
+  const inviteStatus = meetingInvite.status
+    ? `${formatStatusLabel(meetingInvite.status)}${meetingInvite.attendee_email ? ` | ${meetingInvite.attendee_email}` : ""}`
+    : "Not sent yet";
+  const templateEmailStatus = meetingInvite.email?.status
+    ? `${formatStatusLabel(meetingInvite.email.status)}${meetingInvite.email.recipient ? ` | ${meetingInvite.email.recipient}` : ""}`
+    : "Not sent yet";
 
   return `
     <div class="detail-list">
@@ -179,6 +58,10 @@ function buildStatusMarkup(call) {
       <div class="detail-row">
         <span class="detail-label">Lead</span>
         <span>${escapeHtml(call.lead_name)} (${escapeHtml(call.phone)})</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Email ID</span>
+        <span>${escapeHtml(call.email || "-")}</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">Agent</span>
@@ -205,6 +88,20 @@ function buildStatusMarkup(call) {
         <span>Meeting Requested: ${call.meeting_requested ? "Yes" : "No"} | Callback Requested: ${call.callback_requested ? "Yes" : "No"}</span>
       </div>
       <div class="detail-row">
+        <span class="detail-label">Meeting Invite</span>
+        <span>${escapeHtml(inviteStatus)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Template Email</span>
+        <span>${escapeHtml(templateEmailStatus)}</span>
+      </div>
+      ${meetingInvite.meet_link ? `
+        <div class="detail-row">
+          <span class="detail-label">Meet Link</span>
+          <span><a href="${escapeHtml(meetingInvite.meet_link)}" target="_blank" rel="noreferrer">${escapeHtml(meetingInvite.meet_link)}</a></span>
+        </div>
+      ` : ""}
+      <div class="detail-row">
         <span class="detail-label">AI Processing</span>
         <span>${escapeHtml(formatStatusLabel(call.ai_processing_status || "not_started"))}</span>
       </div>
@@ -217,17 +114,6 @@ function buildStatusMarkup(call) {
         <span>${escapeHtml(call.next_action || "No recommendation available yet.")}</span>
       </div>
     </div>
-    ${
-      canMarkCompleted
-        ? `
-          <div class="form-actions">
-            <button class="button secondary" type="button" data-action="mark-completed" data-call-id="${escapeHtml(call.call_id)}">
-              Mark Completed
-            </button>
-          </div>
-        `
-        : ""
-    }
   `;
 }
 
@@ -270,6 +156,7 @@ function validatePayload(payload) {
   requireFields(payload, {
     lead_name: "Lead Name",
     phone: "Phone Number",
+    email: "Email ID",
     agent_id: "Deepgram Agent",
     call_objective: "Call Objective",
     language: "Language",
@@ -278,8 +165,8 @@ function validatePayload(payload) {
   if (!validatePhoneE164(payload.phone)) {
     throw new Error("Phone number must be in E.164 format, for example +919999999999.");
   }
-  if (!payload.executive_callback_allowed_weekdays.length) {
-    throw new Error("Select at least one executive working day.");
+  if (!validateEmail(payload.email)) {
+    throw new Error("Email ID must be a valid email address.");
   }
 }
 
@@ -319,6 +206,7 @@ function applyPrefillFromQuery() {
   const fieldNames = [
     "lead_name",
     "phone",
+    "email",
     "company",
     "city",
     "role",
@@ -355,10 +243,6 @@ form.addEventListener("submit", async (event) => {
 
   try {
     const payload = collectFormValues(form);
-    const formData = new FormData(form);
-    payload.executive_callback_allowed_weekdays = formData
-      .getAll("executive_callback_allowed_weekdays")
-      .map((weekday) => Number(weekday));
     validatePayload(payload);
     const call = await callService.startIndividualCall(payload);
     activeCallId = call.call_id;
@@ -367,7 +251,6 @@ form.addEventListener("submit", async (event) => {
     showSuccess("Manual call started successfully.");
     startPolling(call.call_id);
     await refreshCallStatus();
-    await loadManualSchedules({ showLoading: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start the call.";
     renderMessage("error", message);
@@ -382,45 +265,6 @@ form.addEventListener("reset", () => {
   stopPolling();
   activeCallId = null;
   statusPanel.innerHTML = `<div class="empty-state">No call has been started yet.</div>`;
-  window.setTimeout(setSchedulingDateDefaults, 0);
-});
-
-statusPanel.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-action='mark-completed']");
-  if (!button) {
-    return;
-  }
-
-  const callId = button.dataset.callId;
-  if (!callId) {
-    return;
-  }
-
-  const confirmed = await confirmDialog({
-    title: "Mark call completed",
-    message: "Mark this call as completed? This closes the stuck in-progress record so you can call the same number again.",
-    confirmLabel: "Mark completed",
-  });
-  if (!confirmed) {
-    return;
-  }
-
-  try {
-    button.disabled = true;
-    await callService.updateCallStatus(callId, {
-      status: "completed",
-      notes: "Manually marked completed by operator.",
-    });
-    renderMessage("success", "Call marked completed.");
-    showSuccess("Call marked completed.");
-    await refreshCallStatus();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to mark call completed.";
-    renderMessage("error", message);
-    showError(message);
-  } finally {
-    button.disabled = false;
-  }
 });
 
 bootPage({
@@ -430,7 +274,4 @@ bootPage({
 });
 
 applyPrefillFromQuery();
-setSchedulingDateDefaults();
 loadAgents();
-loadManualSchedules({ showLoading: true });
-window.setInterval(() => loadManualSchedules({ showLoading: false }), frontendConfig.refreshIntervals.scheduledCallsMs);

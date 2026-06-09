@@ -8,7 +8,7 @@ from app.database.fallback_utils import should_use_mongo_fallback
 from app.database.firestore import FirestoreService, get_firestore_service
 from app.database.mongo_fallback import MongoFallbackService, get_mongo_fallback_service
 from app.models.firestore_documents import CallDocument
-from app.utils.time import utc_now
+from app.utils.time import coerce_utc, utc_now
 
 
 class CallRepository:
@@ -28,21 +28,6 @@ class CallRepository:
             )
         return client.collection(self.collection_name)
 
-    def _document_from_payload(self, payload: dict[str, Any], document_id: str | None = None) -> CallDocument:
-        if document_id:
-            payload.setdefault("call_id", document_id)
-            payload.setdefault("id", document_id)
-        else:
-            payload.setdefault("call_id", payload.get("_id"))
-            payload.setdefault("id", payload.get("_id"))
-        return CallDocument.model_validate(payload)
-
-    def _mongo_get(self, call_id: str) -> CallDocument | None:
-        payload = self.mongo_fallback_service.get(self.collection_name, call_id)
-        if not payload:
-            return None
-        return self._document_from_payload(payload, call_id)
-
     def create_call(self, call_document: CallDocument) -> CallDocument:
         payload = call_document.model_dump(exclude_none=True)
         try:
@@ -56,24 +41,25 @@ class CallRepository:
     def get_call(self, call_id: str) -> CallDocument:
         try:
             snapshot = self._collection().document(call_id).get()
-            if snapshot.exists:
-                payload = snapshot.to_dict() or {}
-                payload.setdefault("call_id", snapshot.id)
-                payload.setdefault("id", snapshot.id)
-                self.mongo_fallback_service.upsert(self.collection_name, call_id, payload)
-                return CallDocument.model_validate(payload)
+            if not snapshot.exists:
+                raise AppError(
+                    status_code=404,
+                    code="call_not_found",
+                    message=f"Call '{call_id}' was not found.",
+                )
+            payload = snapshot.to_dict() or {}
+            payload.setdefault("call_id", snapshot.id)
+            payload.setdefault("id", snapshot.id)
+            self.mongo_fallback_service.upsert(self.collection_name, call_id, payload)
+            return CallDocument.model_validate(payload)
+        except AppError as exc:
+            if exc.code not in {"firestore_not_configured", "call_not_found"}:
+                raise
+            return self._get_call_from_mongo_or_raise(call_id)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-
-        mongo_call = self._mongo_get(call_id)
-        if mongo_call is not None:
-            return mongo_call
-        raise AppError(
-            status_code=404,
-            code="call_not_found",
-            message=f"Call '{call_id}' was not found.",
-        )
+            return self._get_call_from_mongo_or_raise(call_id)
 
     def update_call(self, call_id: str, updates: dict[str, Any]) -> CallDocument:
         updates = {**updates, "updated_at": utc_now()}
@@ -86,159 +72,63 @@ class CallRepository:
         self.mongo_fallback_service.upsert(self.collection_name, call_id, updates)
         return self.get_call(call_id)
 
-    def list_calls(
-        self,
-        *,
-        status: str | list[str] | None = None,
-        ai_processing_status: str | list[str] | None = None,
-        limit: int | None = None,
-    ) -> list[CallDocument]:
-        try:
-            calls = self._list_calls_from_firestore(
-                status=status,
-                ai_processing_status=ai_processing_status,
-                limit=limit,
-            )
-        except Exception as exc:
-            if not should_use_mongo_fallback(exc):
-                raise
-            calls = self._list_calls_from_mongo(limit=limit)
-
-        calls = self._filter_calls(calls, status=status, ai_processing_status=ai_processing_status)
-        calls.sort(key=lambda call: call.created_at or utc_now(), reverse=True)
-        return calls
-
-    def _list_calls_from_firestore(
-        self,
-        *,
-        status: str | list[str] | None = None,
-        ai_processing_status: str | list[str] | None = None,
-        limit: int | None = None,
-    ) -> list[CallDocument]:
+    def list_calls(self) -> list[CallDocument]:
         calls: list[CallDocument] = []
-        query = self._collection()
-
-        if status is not None:
-            statuses = [status] if isinstance(status, str) else status
-            if len(statuses) == 1:
-                query = query.where(filter=firestore.FieldFilter("status", "==", statuses[0]))
-            elif statuses:
-                query = query.where(filter=firestore.FieldFilter("status", "in", statuses))
-        elif ai_processing_status is not None:
-            statuses = [ai_processing_status] if isinstance(ai_processing_status, str) else ai_processing_status
-            if len(statuses) == 1:
-                query = query.where(filter=firestore.FieldFilter("ai_processing_status", "==", statuses[0]))
-            elif statuses:
-                query = query.where(filter=firestore.FieldFilter("ai_processing_status", "in", statuses))
-
-        if limit is not None:
-            query = query.limit(limit)
-
-        for snapshot in query.stream():
-            payload = snapshot.to_dict() or {}
-            payload.setdefault("call_id", snapshot.id)
-            payload.setdefault("id", snapshot.id)
-            self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-            calls.append(CallDocument.model_validate(payload))
-        return calls
-
-    def _list_calls_from_mongo(self, *, limit: int | None = None) -> list[CallDocument]:
-        calls: list[CallDocument] = []
-        for payload in self.mongo_fallback_service.list(self.collection_name, limit=limit):
-            calls.append(self._document_from_payload(payload))
-        return calls
-
-    def _filter_calls(
-        self,
-        calls: list[CallDocument],
-        *,
-        status: str | list[str] | None = None,
-        ai_processing_status: str | list[str] | None = None,
-    ) -> list[CallDocument]:
-        filtered_calls: list[CallDocument] = []
-        statuses = [status] if isinstance(status, str) else status
-        ai_statuses = [ai_processing_status] if isinstance(ai_processing_status, str) else ai_processing_status
-        for call in calls:
-            if statuses is not None and call.status not in statuses:
-                continue
-            if ai_statuses is not None and call.ai_processing_status not in ai_statuses:
-                continue
-            filtered_calls.append(call)
-        return filtered_calls
-
-    def list_calls_by_ai_processing_statuses(
-        self,
-        statuses: list[str],
-        *,
-        limit_per_status: int,
-    ) -> list[CallDocument]:
-        calls_by_id: dict[str, CallDocument] = {}
         try:
-            for status in statuses:
-                query = (
-                    self._collection()
-                    .where(filter=firestore.FieldFilter("ai_processing_status", "==", status))
-                    .limit(limit_per_status)
-                )
-                for snapshot in query.stream():
-                    payload = snapshot.to_dict() or {}
-                    payload.setdefault("call_id", snapshot.id)
-                    payload.setdefault("id", snapshot.id)
-                    self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-                    call_document = CallDocument.model_validate(payload)
-                    calls_by_id[call_document.call_id] = call_document
-        except Exception as exc:
-            if not should_use_mongo_fallback(exc):
-                raise
-            for status in statuses:
-                for payload in self.mongo_fallback_service.list(
-                    self.collection_name,
-                    {"ai_processing_status": status},
-                    limit=limit_per_status,
-                ):
-                    call_document = self._document_from_payload(payload)
-                    calls_by_id[call_document.call_id] = call_document
-
-        calls = list(calls_by_id.values())
-        calls.sort(key=lambda call: call.created_at or utc_now(), reverse=True)
-        return calls
-
-    def find_recent_duplicate_individual_call(self, phone: str, *, within_minutes: int) -> CallDocument | None:
-        cutoff = utc_now() - timedelta(minutes=within_minutes)
-        try:
-            snapshots = (
-                self._collection()
-                .where(filter=firestore.FieldFilter("phone", "==", phone))
-                .stream()
-            )
-            candidates = []
-            for snapshot in snapshots:
+            for snapshot in self._collection().stream():
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("call_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
                 self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-                candidates.append(CallDocument.model_validate(payload))
+                calls.append(CallDocument.model_validate(payload))
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            candidates = [
-                self._document_from_payload(payload)
-                for payload in self.mongo_fallback_service.list(self.collection_name, {"phone": phone})
-            ]
+            for payload in self.mongo_fallback_service.list(self.collection_name):
+                payload.setdefault("call_id", payload.get("_id"))
+                payload.setdefault("id", payload.get("_id"))
+                calls.append(CallDocument.model_validate(payload))
+        calls.sort(key=lambda call: coerce_utc(call.created_at or utc_now()), reverse=True)
+        return calls
 
+    def find_recent_duplicate_individual_call(self, phone: str, *, within_minutes: int) -> CallDocument | None:
+        cutoff = utc_now() - timedelta(minutes=within_minutes)
         duplicate_candidates: list[CallDocument] = []
-        for call_document in candidates:
-            if call_document.call_type != "individual":
-                continue
+        try:
+            candidates = (
+                self._collection()
+                .where("phone", "==", phone)
+                .where("call_type", "==", "individual")
+                .stream()
+            )
+            payloads = []
+            for snapshot in candidates:
+                payload = snapshot.to_dict() or {}
+                payload.setdefault("call_id", snapshot.id)
+                payload.setdefault("id", snapshot.id)
+                self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
+                payloads.append(payload)
+        except Exception as exc:
+            if not should_use_mongo_fallback(exc):
+                raise
+            payloads = self.mongo_fallback_service.list(
+                self.collection_name,
+                {"phone": phone, "call_type": "individual"},
+            )
+
+        for payload in payloads:
+            payload.setdefault("call_id", payload.get("call_id") or payload.get("_id"))
+            payload.setdefault("id", payload.get("id") or payload.get("_id"))
+            call_document = CallDocument.model_validate(payload)
             if call_document.callback_id:
                 continue
-            if (call_document.created_at or utc_now()) < cutoff:
+            if coerce_utc(call_document.created_at or utc_now()) < cutoff:
                 continue
             if call_document.status in {"completed", "failed", "busy", "no_answer"}:
                 continue
             duplicate_candidates.append(call_document)
 
-        duplicate_candidates.sort(key=lambda call: call.created_at or utc_now(), reverse=True)
+        duplicate_candidates.sort(key=lambda call: coerce_utc(call.created_at or utc_now()), reverse=True)
         return duplicate_candidates[0] if duplicate_candidates else None
 
     def append_event(self, call_id: str, event: dict[str, Any]) -> None:
@@ -257,12 +147,11 @@ class CallRepository:
         self.mongo_fallback_service.upsert(self.collection_name, call_id, {"updated_at": utc_now()})
 
     def append_transcript_entry(self, call_id: str, transcript_entry: dict[str, Any]) -> CallDocument:
-        now = utc_now()
         try:
             self._collection().document(call_id).set(
                 {
-                    "updated_at": now,
-                    "transcript_ingested_at": now,
+                    "updated_at": utc_now(),
+                    "transcript_ingested_at": utc_now(),
                     "transcript": firestore.ArrayUnion([transcript_entry]),
                 },
                 merge=True,
@@ -274,23 +163,28 @@ class CallRepository:
         self.mongo_fallback_service.upsert(
             self.collection_name,
             call_id,
-            {"updated_at": now, "transcript_ingested_at": now},
+            {"updated_at": utc_now(), "transcript_ingested_at": utc_now()},
         )
         return self.get_call(call_id)
 
     def replace_transcript(self, call_id: str, transcript: list[dict[str, Any]]) -> CallDocument:
-        now = utc_now()
-        payload = {
-            "updated_at": now,
-            "transcript_ingested_at": now,
-            "transcript": transcript,
-        }
         try:
-            self._collection().document(call_id).set(payload, merge=True)
+            self._collection().document(call_id).set(
+                {
+                    "updated_at": utc_now(),
+                    "transcript_ingested_at": utc_now(),
+                    "transcript": transcript,
+                },
+                merge=True,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-        self.mongo_fallback_service.upsert(self.collection_name, call_id, payload)
+        self.mongo_fallback_service.upsert(
+            self.collection_name,
+            call_id,
+            {"updated_at": utc_now(), "transcript_ingested_at": utc_now(), "transcript": transcript},
+        )
         return self.get_call(call_id)
 
     def delete_call(self, call_id: str) -> None:
@@ -305,25 +199,23 @@ class CallRepository:
         try:
             documents = (
                 self._collection()
-                .where(filter=firestore.FieldFilter("twilio_call_sid", "==", twilio_call_sid))
+                .where("twilio_call_sid", "==", twilio_call_sid)
                 .limit(1)
                 .stream()
             )
             snapshot = next(documents, None)
-            if snapshot is not None:
-                payload = snapshot.to_dict() or {}
-                payload.setdefault("call_id", snapshot.id)
-                payload.setdefault("id", snapshot.id)
-                self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-                return CallDocument.model_validate(payload)
+            if snapshot is None:
+                return self._get_call_by_twilio_sid_from_mongo(twilio_call_sid)
+
+            payload = snapshot.to_dict() or {}
+            payload.setdefault("call_id", snapshot.id)
+            payload.setdefault("id", snapshot.id)
+            self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
+            return CallDocument.model_validate(payload)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-
-        items = self.mongo_fallback_service.list(self.collection_name, {"twilio_call_sid": twilio_call_sid}, limit=1)
-        if not items:
-            return None
-        return self._document_from_payload(items[0])
+            return self._get_call_by_twilio_sid_from_mongo(twilio_call_sid)
 
     def mark_webhook_event_processed(self, call_id: str, event_key: str) -> CallDocument:
         existing_call = self.get_call(call_id)
@@ -335,6 +227,23 @@ class CallRepository:
             "processed_webhook_events": processed_keys[-100:],
         }
         return self.update_call(call_id, {"metadata": metadata})
+
+    def _get_call_from_mongo_or_raise(self, call_id: str) -> CallDocument:
+        payload = self.mongo_fallback_service.get(self.collection_name, call_id)
+        if not payload:
+            raise AppError(status_code=404, code="call_not_found", message=f"Call '{call_id}' was not found.")
+        payload.setdefault("call_id", call_id)
+        payload.setdefault("id", call_id)
+        return CallDocument.model_validate(payload)
+
+    def _get_call_by_twilio_sid_from_mongo(self, twilio_call_sid: str) -> CallDocument | None:
+        items = self.mongo_fallback_service.list(self.collection_name, {"twilio_call_sid": twilio_call_sid})
+        if not items:
+            return None
+        payload = items[0]
+        payload.setdefault("call_id", payload.get("call_id") or payload.get("_id"))
+        payload.setdefault("id", payload.get("id") or payload.get("_id"))
+        return CallDocument.model_validate(payload)
 
 
 def get_call_repository() -> CallRepository:

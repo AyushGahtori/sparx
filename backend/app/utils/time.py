@@ -1,4 +1,13 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+
+INDIA_TIMEZONE_NAME = "Asia/Kolkata"
+INDIA_TIMEZONE = ZoneInfo(INDIA_TIMEZONE_NAME)
+
+
+def india_now() -> datetime:
+    return datetime.now(INDIA_TIMEZONE)
 
 
 def utc_now() -> datetime:
@@ -13,6 +22,12 @@ def coerce_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def coerce_india(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=INDIA_TIMEZONE)
+    return value.astimezone(INDIA_TIMEZONE)
 
 
 def format_uptime(started_at: datetime) -> str:

@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import dateparser
@@ -155,6 +155,9 @@ class CallbackTimeService:
     ) -> tuple[str, CallbackConfidence]:
         prepared = cleaned_text
         confidence: CallbackConfidence = "high" if self.explicit_time_pattern.search(cleaned_text) else "medium"
+        sentence_time = self._extract_sentence_time(cleaned_text)
+        if sentence_time:
+            return sentence_time, "high"
 
         if cleaned_text == "tomorrow":
             return "tomorrow 11:00 am", "medium"
@@ -164,10 +167,8 @@ class CallbackTimeService:
             return cleaned_text.replace("morning", "10:00 am"), "medium"
         if re.fullmatch(r"(next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)", cleaned_text):
             return f"{cleaned_text} 11:00 am", "medium"
-        if cleaned_text == "5 pm" and base_local.hour >= 17:
-            return "tomorrow 5:00 pm", "medium"
-        if self.explicit_time_pattern.fullmatch(cleaned_text):
-            return f"today {cleaned_text}", confidence
+        if re.fullmatch(r"\d{1,2}(?::\d{2})?\s*(am|pm)", cleaned_text):
+            return f"today {cleaned_text}", "high"
 
         if "morning" in cleaned_text and not self.explicit_time_pattern.search(cleaned_text):
             prepared = cleaned_text.replace("morning", "10:00 am")
@@ -182,7 +183,31 @@ class CallbackTimeService:
             prepared = cleaned_text.replace("night", "8:00 pm")
             confidence = "medium"
 
+        if prepared == "5 pm" and base_local.hour >= 17:
+            prepared = "tomorrow 5:00 pm"
+            confidence = "medium"
+
         return prepared, confidence
+
+    def _extract_sentence_time(self, cleaned_text: str) -> str | None:
+        time_match = re.search(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", cleaned_text, re.IGNORECASE)
+        if not time_match:
+            return None
+
+        time_text = time_match.group(0)
+        date_word_match = re.search(r"\b(today|tomorrow)\b", cleaned_text, re.IGNORECASE)
+        if date_word_match:
+            return f"{date_word_match.group(1).lower()} {time_text}"
+
+        weekday_match = re.search(
+            r"\b(next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            cleaned_text,
+            re.IGNORECASE,
+        )
+        if weekday_match:
+            return f"{weekday_match.group(0).lower()} {time_text}"
+
+        return f"today {time_text}"
 
     def _parse_custom_phrase(
         self,
@@ -282,7 +307,7 @@ class CallbackTimeService:
         return base_local.replace(year=year, month=month, day=day, hour=hour, minute=0, second=0, microsecond=0)
 
     def _resolve_timezone(self, timezone_name: str | None) -> ZoneInfo:
-        target_timezone_name = timezone_name or self.settings.callback_default_timezone
+        target_timezone_name = self.settings.callback_default_timezone
         try:
             return ZoneInfo(target_timezone_name)
         except Exception as exc:
@@ -310,7 +335,7 @@ class CallbackTimeService:
     ) -> CallbackTimeResolution:
         return CallbackTimeResolution(
             requested_time_raw=requested_time_raw,
-            normalized_callback_time=candidate_local.astimezone(timezone.utc),
+            normalized_callback_time=candidate_local,
             timezone=timezone_name,
             requested_time_confidence=confidence,
             adjustment_reason=adjustment_reason,

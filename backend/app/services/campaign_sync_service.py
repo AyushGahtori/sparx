@@ -44,6 +44,8 @@ class CampaignSyncService:
             "call_id": call_document.call_id,
             "latest_call_status": call_document.status,
         }
+        if call_document.email:
+            updates["email"] = call_document.email
         try:
             await run_in_threadpool(
                 self.contact_repository.update_contact,

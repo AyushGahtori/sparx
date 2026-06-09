@@ -29,6 +29,11 @@ class TranscriptService:
         ),
     ]
     explicit_time_pattern = re.compile(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b", re.IGNORECASE)
+    relative_time_pattern = re.compile(
+        r"\b(?:in|after)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty)\s+"
+        r"(?:min|mins|minute|minutes|hour|hours)\b",
+        re.IGNORECASE,
+    )
     explicit_meeting_phrase_pattern = re.compile(
         r"\b(?:(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*(?:at)?\s*)?"
         r"(\d{1,2}(?::\d{2})?\s?(?:am|pm))"
@@ -124,6 +129,7 @@ class TranscriptService:
                 match = pattern.search(candidate)
                 if not match:
                     continue
+                # Prefer the most explicit group while preserving original text casing.
                 groups = [item for item in match.groups() if item]
                 if groups:
                     return " ".join(groups).strip()
@@ -133,7 +139,7 @@ class TranscriptService:
     def has_explicit_time(self, value: str | None) -> bool:
         if not value:
             return False
-        return bool(self.explicit_time_pattern.search(value))
+        return bool(self.explicit_time_pattern.search(value) or self.relative_time_pattern.search(value))
 
     def extract_explicit_meeting_phrase(self, value: str | None) -> str | None:
         if not value:
@@ -165,6 +171,8 @@ class TranscriptService:
             transcript_text or "",
         ]
 
+        # Pass 1: Prefer explicit clock times (e.g., 5:20 PM, tomorrow 7 PM)
+        # from any source before considering relative phrases.
         for source in ordered_sources:
             source = source.strip()
             if not source:
@@ -187,8 +195,19 @@ class TranscriptService:
                 continue
 
             for raw_phrase, _ in parsed:
-                if self.has_explicit_time(raw_phrase):
+                # Only accept explicit clock forms in pass 1.
+                if self.explicit_time_pattern.search(raw_phrase):
                     return raw_phrase.strip()
+
+        # Pass 2: fall back to relative phrases (e.g., after 5 minutes)
+        for source in ordered_sources:
+            source = source.strip()
+            if not source:
+                continue
+
+            relative_match = self.relative_time_pattern.search(source)
+            if relative_match:
+                return relative_match.group(0).strip()
 
         fallback = self.extract_meeting_time_text(*ordered_sources)
         if self.has_explicit_time(fallback):
@@ -206,7 +225,9 @@ class TranscriptService:
             return None
 
         raw_value = value.strip()
-        if not raw_value or not self.has_explicit_time(raw_value):
+        if not raw_value:
+            return None
+        if not self.has_explicit_time(raw_value):
             return None
 
         base = coerce_utc(reference_time or utc_now())
@@ -224,7 +245,7 @@ class TranscriptService:
         if parsed is None:
             return raw_value
 
-        local_dt = parsed.astimezone(ZoneInfo(timezone_name))
+        local_dt = parsed
         hour_24 = local_dt.hour
         minute = local_dt.minute
         meridiem = "AM" if hour_24 < 12 else "PM"

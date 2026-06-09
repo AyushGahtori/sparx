@@ -18,8 +18,8 @@
         <div class="page-grid">
           <section class="panel page-intro">
             <span class="eyebrow">Campaigns</span>
-            <h2>Bulk AI outbound campaign management</h2>
-            <p>Validate CSV leads, create campaigns, watch progress, and control queue execution without leaving the dashboard.</p>
+            <h2>Production-ready outbound campaign operations</h2>
+            <p>Build campaigns with a full product brief, upload lead files from multiple formats, trigger calls, and review every lead conversation, callback, and meeting from one campaign intelligence section.</p>
           </section>
 
           <div class="page-grid two-column">
@@ -27,7 +27,7 @@
               <div class="panel-header">
                 <div>
                   <h2>Create Campaign</h2>
-                  <p class="panel-subtitle">Upload CSV contacts and launch an immediate or scheduled campaign.</p>
+                  <p class="panel-subtitle">Configure the sales objective, attach the product brief, then upload your lead source file.</p>
                 </div>
               </div>
               <div id="campaign-form-message"></div>
@@ -35,7 +35,7 @@
                 <div class="form-grid">
                   <div class="form-field">
                     <label for="campaign-name">Campaign Name</label>
-                    <input id="campaign-name" name="campaign_name" type="text" value="Q2 Sales Campaign" required>
+                    <input id="campaign-name" name="campaign_name" type="text" placeholder="Campaign name" required>
                   </div>
                   <div class="form-field">
                     <label for="agent-id">Select Deepgram Agent</label>
@@ -43,15 +43,51 @@
                   </div>
                   <div class="form-field">
                     <label for="campaign-type">Campaign Type</label>
-                    <input id="campaign-type" name="campaign_type" type="text" value="Lead Qualification" required>
+                    <input id="campaign-type" name="campaign_type" type="text" placeholder="Campaign type" required>
                   </div>
                   <div class="form-field">
                     <label for="language">Language</label>
-                    <input id="language" name="language" type="text" value="English + Hindi" required>
+                    <input id="language" name="language" type="text" placeholder="Target language" required>
                   </div>
                   <div class="form-field full-width">
                     <label for="call-objective">Call Objective</label>
-                    <input id="call-objective" name="call_objective" type="text" value="Introduce SPARX and qualify interest" required>
+                    <input id="call-objective" name="call_objective" type="text" placeholder="Primary campaign objective" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="product-name">Product Name</label>
+                    <input id="product-name" name="product_name" type="text" placeholder="Product or service name" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="product-website">Product Website</label>
+                    <input id="product-website" name="product_website" type="url" placeholder="https://example.com">
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="offer-summary">Offer Summary</label>
+                    <input id="offer-summary" name="offer_summary" type="text" placeholder="Short offer summary">
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="product-description">Product Description</label>
+                    <textarea id="product-description" name="product_description" placeholder="Describe the product, use case, and value clearly for the calling agent." required></textarea>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="value-proposition">Value Proposition</label>
+                    <textarea id="value-proposition" name="value_proposition" placeholder="Core value proposition"></textarea>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="target-audience">Target Audience</label>
+                    <textarea id="target-audience" name="target_audience" placeholder="Target audience"></textarea>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="qualification-criteria">Qualification Criteria</label>
+                    <textarea id="qualification-criteria" name="qualification_criteria" placeholder="Lead qualification criteria"></textarea>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="objection-handling">Objection Handling Guidance</label>
+                    <textarea id="objection-handling" name="objection_handling" placeholder="Suggested objection handling guidance"></textarea>
+                  </div>
+                  <div class="form-field full-width">
+                    <label for="meeting-goal">Meeting Goal</label>
+                    <input id="meeting-goal" name="meeting_goal" type="text" placeholder="Desired meeting outcome">
                   </div>
                   <div class="form-field">
                     <label for="priority">Priority</label>
@@ -68,54 +104,34 @@
                       <option value="scheduled">Scheduled</option>
                     </select>
                   </div>
+                  <div class="form-field full-width">
+                    <label>Call Generation Mode</label>
+                    <div class="choice-grid">
+                      <label class="choice-option">
+                        <input name="dispatch_mode" type="radio" value="parallel" checked>
+                        <span class="choice-option__title">All counted customers</span>
+                        <span class="choice-option__copy">Queues every validated lead with the normal parallel campaign flow.</span>
+                      </label>
+                      <label class="choice-option">
+                        <input name="dispatch_mode" type="radio" value="one_by_one">
+                        <span class="choice-option__title">One by one</span>
+                        <span class="choice-option__copy">Keeps the campaign to one active outbound lead at a time.</span>
+                      </label>
+                    </div>
+                    <span class="field-help">This works the same way for CSV, Excel, PDF, DOC, DOCX, and TXT uploads after lead preview validation.</span>
+                  </div>
                   <div id="scheduled-at-wrapper" class="form-field full-width hidden">
                     <label for="scheduled-at">Scheduled Date & Time</label>
                     <input id="scheduled-at" name="scheduled_at" type="datetime-local">
                   </div>
                   <div class="form-field full-width">
-                    <label for="csv-file">CSV Upload</label>
-                    <input id="csv-file" name="csv_file" type="file" accept=".csv,text/csv" required>
-                    <span class="field-help">Required columns: <code>name</code> and <code>phone</code>. Optional: <code>company</code>, <code>city</code>, <code>role</code>, <code>interest</code>.</span>
+                    <label for="csv-file">Lead Source Upload</label>
+                    <input id="csv-file" name="csv_file" type="file" accept=".csv,.xlsx,.xls,.pdf,.doc,.docx,.txt" required>
+                    <span class="field-help">Supported files: <code>.csv</code>, <code>.xlsx</code>, <code>.xls</code>, <code>.pdf</code>, <code>.doc</code>, <code>.docx</code>, and <code>.txt</code>. Use tables or labeled lead fields like Name, Phone, Company, and Email for the best extraction quality.</span>
                   </div>
                   <div class="form-field full-width">
-                    <label>Campaign AI Callback Limit</label>
-                    <div class="schedule-policy-grid">
-                      <div class="form-field">
-                        <label for="ai-callback-max-date">Maximum Callback Date</label>
-                        <input id="ai-callback-max-date" name="ai_callback_max_date" type="date">
-                      </div>
-                    </div>
-                  </div>
-                  <div class="form-field full-width">
-                    <label>Campaign Executive Call Request Limits</label>
-                    <div class="schedule-policy-grid">
-                      <div class="form-field">
-                        <label for="executive-callback-max-date">Maximum Executive Callback Date</label>
-                        <input id="executive-callback-max-date" name="executive_callback_max_date" type="date">
-                      </div>
-                      <div class="form-field">
-                        <label>Executive Working Days</label>
-                        <div class="checkbox-grid">
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="0" checked> Monday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="1" checked> Tuesday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="2" checked> Wednesday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="3" checked> Thursday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="4" checked> Friday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="5"> Saturday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="6"> Sunday</label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="form-field full-width">
-                    <label for="notes">Agent Instructions</label>
-                    <textarea id="notes" name="notes" rows="10"></textarea>
-                    <span class="field-help">This is prefilled from the selected backend agent prompt. Edits here become the campaign-specific instructions used during calls.</span>
-                  </div>
-                  <div class="form-field full-width">
-                    <label for="agent-instructions-file">Upload Agent Instructions (.txt)</label>
-                    <input id="agent-instructions-file" type="file" accept=".txt,text/plain">
-                    <span class="field-help">Uploading a text file will replace the instructions above with the file contents.</span>
+                    <label for="notes">Operator Notes</label>
+                    <textarea id="notes" name="notes" placeholder="Optional operator notes"></textarea>
                   </div>
                 </div>
                 <div class="form-actions">
@@ -128,11 +144,11 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <h2>CSV Preview</h2>
-                  <p class="panel-subtitle">Validation runs before campaign creation.</p>
+                  <h2>Lead File Preview</h2>
+                  <p class="panel-subtitle">Validation runs before campaign creation so only clean contacts move into the queue.</p>
                 </div>
               </div>
-              <div id="csv-preview-panel" class="empty-state">Upload a CSV to preview valid, invalid, and duplicate rows.</div>
+              <div id="csv-preview-panel" class="empty-state">Upload a lead file to preview valid, invalid, and duplicate contacts.</div>
             </section>
           </div>
 
@@ -140,7 +156,7 @@
             <div class="panel-header">
               <div>
                 <h2>Campaign Dashboard</h2>
-                <p class="panel-subtitle">Search, filter, and control current campaigns.</p>
+                <p class="panel-subtitle">Search, filter, and control current campaigns without leaving the page.</p>
               </div>
               <div class="header-actions">
                 <button id="refresh-campaigns-button" class="button secondary" type="button">Refresh</button>
@@ -150,7 +166,7 @@
             <form id="campaign-filters" class="filter-bar">
               <div class="form-field">
                 <label for="campaign-search">Search</label>
-                <input id="campaign-search" name="search" type="text" placeholder="Campaign name or objective">
+                <input id="campaign-search" name="search" type="text" placeholder="Campaign name, objective, or product">
               </div>
               <div class="form-field">
                 <label for="campaign-status-filter">Status</label>
@@ -191,63 +207,18 @@
             </div>
           </section>
 
-          <div class="page-grid two-column">
-            <section class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Campaign AI Callbacks</h2>
-                  <p class="panel-subtitle">Campaign customers who asked the AI to call them again later.</p>
-                </div>
-                <span id="campaign-ai-callback-count" class="status-pill scheduled">0</span>
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Campaign Data</h2>
+                <p class="panel-subtitle">Every lead, conversation, callback, and scheduled meeting rolls up here for the selected campaign.</p>
               </div>
-              <div id="campaign-schedule-message"></div>
-              <div class="table-shell">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Campaign</th>
-                      <th>Name</th>
-                      <th>Phone Number</th>
-                      <th>Scheduled Date</th>
-                      <th>Scheduled Time</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="campaign-ai-callback-table-body">
-                    <tr><td colspan="6">Loading campaign AI callbacks...</td></tr>
-                  </tbody>
-                </table>
+              <div class="header-actions">
+                <button id="refresh-campaign-data-button" class="button secondary" type="button">Refresh Selected</button>
               </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Campaign Executive Call Requests</h2>
-                  <p class="panel-subtitle">Campaign customers who requested a real person from the team.</p>
-                </div>
-                <span id="campaign-executive-request-count" class="status-pill scheduled">0</span>
-              </div>
-              <div class="table-shell">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Campaign</th>
-                      <th>Name</th>
-                      <th>Phone Number</th>
-                      <th>Scheduled Date</th>
-                      <th>Scheduled Time</th>
-                      <th>Status</th>
-                      <th>Assigned Executive</th>
-                    </tr>
-                  </thead>
-                  <tbody id="campaign-executive-request-table-body">
-                    <tr><td colspan="7">Loading campaign executive requests...</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
+            </div>
+            <div id="campaign-data-panel" class="empty-state">Select “Campaign Data” on a campaign row to load the production campaign workspace.</div>
+          </section>
         </div>
       </main>
     </div>
@@ -256,6 +227,7 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/campaigns.js?v=scheduling-limits"></script>
+  <script src="../runtime-config.js"></script>
+  <script type="module" src="../js/campaigns.js"></script>
 </body>
 </html>

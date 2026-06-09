@@ -35,19 +35,19 @@
                 <div class="form-grid">
                   <div class="form-field">
                     <label for="lead-name">Lead Name</label>
-                    <input id="lead-name" name="lead_name" type="text" value="Rahul Sharma" required>
+                    <input id="lead-name" name="lead_name" type="text" placeholder="Lead full name" required>
                   </div>
                   <div class="form-field">
                     <label for="phone">Phone</label>
-                    <input id="phone" name="phone" type="tel" value="+91" required>
+                    <input id="phone" name="phone" type="tel" placeholder="+1 555 010 0100" required>
                   </div>
                   <div class="form-field full-width">
                     <label for="callback-reason">Reason</label>
-                    <input id="callback-reason" name="callback_reason" type="text" value="Lead requested a callback after lunch" required>
+                    <input id="callback-reason" name="callback_reason" type="text" placeholder="Reason for the callback" required>
                   </div>
                   <div class="form-field full-width">
                     <label for="requested-time-raw">Requested Time</label>
-                    <input id="requested-time-raw" name="requested_time_raw" type="text" value="tomorrow after lunch" required>
+                    <input id="requested-time-raw" name="requested_time_raw" type="text" placeholder="Requested time, for example tomorrow after lunch" required>
                   </div>
                   <div class="form-field">
                     <label for="priority">Priority</label>
@@ -60,7 +60,7 @@
                   </div>
                   <div class="form-field full-width">
                     <label for="notes">Notes</label>
-                    <textarea id="notes" name="notes">Lead asked to reconnect after lunch and review pricing.</textarea>
+                    <textarea id="notes" name="notes" placeholder="Optional callback notes"></textarea>
                   </div>
                 </div>
                 <div class="form-actions">
@@ -125,7 +125,6 @@
                 <select id="filter-source" name="source">
                   <option value="">All</option>
                   <option value="manual">Manual</option>
-                  <option value="action">Action</option>
                   <option value="individual">Individual</option>
                   <option value="campaign">Campaign</option>
                   <option value="webhook">Webhook</option>
@@ -174,6 +173,7 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
+  <script src="../runtime-config.js"></script>
   <script type="module" src="../js/callbacks.js"></script>
 </body>
 </html>

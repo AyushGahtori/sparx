@@ -13,7 +13,6 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded"]
     backend: Literal["healthy"] = "healthy"
     firebase: Literal["connected", "not_configured", "unavailable"]
-    mongodb: Literal["connected", "not_configured", "unavailable"] = "not_configured"
     twilio: Literal["connected", "not_configured", "unavailable"]
     deepgram: Literal["connected", "not_configured", "unavailable"]
     gemma: Literal["connected", "not_configured", "unavailable"]
@@ -24,7 +23,7 @@ class HealthResponse(BaseModel):
 
 
 class QueueHealth(BaseModel):
-    status: Literal["healthy", "degraded"]
+    status: Literal["healthy", "degraded", "disabled"]
     loop_running: bool
     active_items: int
     last_cycle_started_at: str | None = None
@@ -37,13 +36,12 @@ class SystemHealthResponse(BaseModel):
     status: Literal["healthy", "degraded"]
     backend: Literal["healthy", "degraded"]
     firebase: Literal["connected", "not_configured", "unavailable"]
-    mongodb: Literal["connected", "not_configured", "unavailable"] = "not_configured"
     twilio: Literal["connected", "not_configured", "unavailable"]
     deepgram: Literal["connected", "not_configured", "unavailable"]
     gemma: Literal["connected", "not_configured", "unavailable"]
-    campaign_queue: Literal["healthy", "degraded"]
-    callback_queue: Literal["healthy", "degraded"]
-    ai_queue: Literal["healthy", "degraded"]
+    campaign_queue: Literal["healthy", "degraded", "disabled"]
+    callback_queue: Literal["healthy", "degraded", "disabled"]
+    ai_queue: Literal["healthy", "degraded", "disabled"]
     uptime: str
     timestamp: str
     environment: str

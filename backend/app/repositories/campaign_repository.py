@@ -7,7 +7,7 @@ from app.database.fallback_utils import should_use_mongo_fallback
 from app.database.firestore import FirestoreService, get_firestore_service
 from app.database.mongo_fallback import MongoFallbackService, get_mongo_fallback_service
 from app.models.firestore_documents import CampaignDocument
-from app.utils.time import utc_now
+from app.utils.time import coerce_utc, utc_now
 
 
 class CampaignRepository:
@@ -27,15 +27,6 @@ class CampaignRepository:
             )
         return client.collection(self.collection_name)
 
-    def _document_from_payload(self, payload: dict[str, Any], document_id: str | None = None) -> CampaignDocument:
-        if document_id:
-            payload.setdefault("campaign_id", document_id)
-            payload.setdefault("id", document_id)
-        else:
-            payload.setdefault("campaign_id", payload.get("_id"))
-            payload.setdefault("id", payload.get("_id"))
-        return CampaignDocument.model_validate(payload)
-
     def create_campaign(self, campaign_document: CampaignDocument) -> CampaignDocument:
         payload = campaign_document.model_dump(exclude_none=True)
         try:
@@ -49,32 +40,31 @@ class CampaignRepository:
     def get_campaign(self, campaign_id: str) -> CampaignDocument:
         try:
             snapshot = self._collection().document(campaign_id).get()
-            if snapshot.exists:
-                payload = snapshot.to_dict() or {}
-                payload.setdefault("campaign_id", snapshot.id)
-                payload.setdefault("id", snapshot.id)
-                self.mongo_fallback_service.upsert(self.collection_name, campaign_id, payload)
-                return CampaignDocument.model_validate(payload)
+            if not snapshot.exists:
+                raise AppError(
+                    status_code=404,
+                    code="campaign_not_found",
+                    message=f"Campaign '{campaign_id}' was not found.",
+                )
+
+            payload = snapshot.to_dict() or {}
+            payload.setdefault("campaign_id", snapshot.id)
+            payload.setdefault("id", snapshot.id)
+            self.mongo_fallback_service.upsert(self.collection_name, campaign_id, payload)
+            return CampaignDocument.model_validate(payload)
+        except AppError as exc:
+            if exc.code not in {"firestore_not_configured", "campaign_not_found"}:
+                raise
+            return self._get_campaign_from_mongo_or_raise(campaign_id)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
+            return self._get_campaign_from_mongo_or_raise(campaign_id)
 
-        payload = self.mongo_fallback_service.get(self.collection_name, campaign_id)
-        if payload:
-            return self._document_from_payload(payload, campaign_id)
-        raise AppError(
-            status_code=404,
-            code="campaign_not_found",
-            message=f"Campaign '{campaign_id}' was not found.",
-        )
-
-    def list_campaigns(self, *, limit: int | None = None) -> list[CampaignDocument]:
+    def list_campaigns(self) -> list[CampaignDocument]:
+        campaigns: list[CampaignDocument] = []
         try:
-            campaigns: list[CampaignDocument] = []
-            query = self._collection()
-            if limit is not None:
-                query = query.limit(limit)
-            for snapshot in query.stream():
+            for snapshot in self._collection().stream():
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("campaign_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
@@ -83,49 +73,12 @@ class CampaignRepository:
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            campaigns = [
-                self._document_from_payload(payload)
-                for payload in self.mongo_fallback_service.list(self.collection_name, limit=limit)
-            ]
+            for payload in self.mongo_fallback_service.list(self.collection_name):
+                payload.setdefault("campaign_id", payload.get("campaign_id") or payload.get("_id"))
+                payload.setdefault("id", payload.get("id") or payload.get("_id"))
+                campaigns.append(CampaignDocument.model_validate(payload))
 
-        campaigns.sort(key=lambda campaign: campaign.created_at or utc_now(), reverse=True)
-        return campaigns
-
-    def list_campaigns_by_statuses(
-        self,
-        statuses: list[str],
-        *,
-        limit_per_status: int,
-    ) -> list[CampaignDocument]:
-        campaigns_by_id: dict[str, CampaignDocument] = {}
-        try:
-            for status in statuses:
-                query = (
-                    self._collection()
-                    .where(filter=firestore.FieldFilter("status", "==", status))
-                    .limit(limit_per_status)
-                )
-                for snapshot in query.stream():
-                    payload = snapshot.to_dict() or {}
-                    payload.setdefault("campaign_id", snapshot.id)
-                    payload.setdefault("id", snapshot.id)
-                    self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-                    campaign_document = CampaignDocument.model_validate(payload)
-                    campaigns_by_id[campaign_document.campaign_id] = campaign_document
-        except Exception as exc:
-            if not should_use_mongo_fallback(exc):
-                raise
-            for status in statuses:
-                for payload in self.mongo_fallback_service.list(
-                    self.collection_name,
-                    {"status": status},
-                    limit=limit_per_status,
-                ):
-                    campaign_document = self._document_from_payload(payload)
-                    campaigns_by_id[campaign_document.campaign_id] = campaign_document
-
-        campaigns = list(campaigns_by_id.values())
-        campaigns.sort(key=lambda campaign: campaign.created_at or utc_now(), reverse=True)
+        campaigns.sort(key=lambda campaign: coerce_utc(campaign.created_at or utc_now()), reverse=True)
         return campaigns
 
     def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> CampaignDocument:
@@ -161,6 +114,18 @@ class CampaignRepository:
             if not should_use_mongo_fallback(exc):
                 raise
         self.mongo_fallback_service.delete(self.collection_name, campaign_id)
+
+    def _get_campaign_from_mongo_or_raise(self, campaign_id: str) -> CampaignDocument:
+        payload = self.mongo_fallback_service.get(self.collection_name, campaign_id)
+        if not payload:
+            raise AppError(
+                status_code=404,
+                code="campaign_not_found",
+                message=f"Campaign '{campaign_id}' was not found.",
+            )
+        payload.setdefault("campaign_id", campaign_id)
+        payload.setdefault("id", campaign_id)
+        return CampaignDocument.model_validate(payload)
 
 
 def get_campaign_repository() -> CampaignRepository:

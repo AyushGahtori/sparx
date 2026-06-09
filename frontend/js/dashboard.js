@@ -11,6 +11,7 @@ import {
   escapeHtml,
   formatDateTime,
   formatStatusLabel,
+  parseAppDate,
   truncateText,
 } from "./utils/formatter.js";
 import { showError, showSuccess } from "./utils/notifications.js";
@@ -21,24 +22,25 @@ const campaignStatusWidget = document.getElementById("campaign-status-widget");
 const callbackQueueWidget = document.getElementById("callback-queue-widget");
 const refreshButton = document.getElementById("refresh-dashboard-button");
 
-function buildKpiCards({ calls, callbacks, summaries }) {
-  const campaignCalls = calls.filter((call) => call.call_type === "campaign").length;
-  const manualCalls = calls.length - campaignCalls;
+function buildKpiCards({ calls, campaigns, callbacks, summaries }) {
+  const activeCampaigns = campaigns.filter((campaign) => ["running", "scheduled", "paused"].includes(campaign.status)).length;
   const callbacksPending = callbacks.filter((callback) =>
     ["scheduled", "queued", "in_progress", "rescheduled", "failed"].includes(callback.status),
   ).length;
   const meetingsRequested = calls.filter(
     (call) => call.meeting_requested || call.call_outcome === "meeting_requested",
   ).length;
-  const hotLeads = summaries.filter((summary) => summary.lead_type === "hot").length;
+  const processedSummaries = summaries.filter((summary) => summary.processed_by_ai || summary.ai_processing_status === "completed").length;
+  const aiSuccessRate = summaries.length ? Math.round((processedSummaries / summaries.length) * 100) : 0;
+  const conversionRate = calls.length ? Math.round((meetingsRequested / calls.length) * 100) : 0;
 
   const cards = [
     { label: "Total Calls", value: calls.length, footnote: "All stored call documents" },
-    { label: "Campaign Calls", value: campaignCalls, footnote: "Bulk queue-driven outbound calls" },
-    { label: "Manual Calls", value: manualCalls, footnote: "Individual and callback-origin calls" },
-    { label: "Callbacks Pending", value: callbacksPending, footnote: "Open callback queue items" },
-    { label: "Meetings Requested", value: meetingsRequested, footnote: "Calls flagged for meetings" },
-    { label: "Hot Leads", value: hotLeads, footnote: "AI-classified hot opportunities" },
+    { label: "Active Campaigns", value: activeCampaigns, footnote: "Running, scheduled, or paused campaigns" },
+    { label: "Callback Queue", value: callbacksPending, footnote: "Open callback queue items" },
+    { label: "Meetings Scheduled", value: meetingsRequested, footnote: "Calls flagged for meetings" },
+    { label: "AI Success Rate", value: `${aiSuccessRate}%`, footnote: "Processed AI intelligence coverage" },
+    { label: "Conversion Rate", value: `${conversionRate}%`, footnote: "Meeting requests from total calls" },
   ];
 
   kpiRoot.innerHTML = cards
@@ -94,7 +96,7 @@ function renderCampaignWidget(campaigns) {
     if (leftRank !== rightRank) {
       return leftRank - rightRank;
     }
-    return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
+    return parseAppDate(right.created_at || 0).getTime() - parseAppDate(left.created_at || 0).getTime();
   });
 
   campaignStatusWidget.innerHTML = `
@@ -125,7 +127,7 @@ function renderCallbackWidget(callbacks) {
 
   const sortedCallbacks = [...callbacks].sort(
     (left, right) =>
-      new Date(left.normalized_callback_time).getTime() - new Date(right.normalized_callback_time).getTime(),
+      parseAppDate(left.normalized_callback_time).getTime() - parseAppDate(right.normalized_callback_time).getTime(),
   );
 
   callbackQueueWidget.innerHTML = `
@@ -149,19 +151,10 @@ function renderCallbackWidget(callbacks) {
   `;
 }
 
-let isDashboardRefreshing = false;
-
-async function loadDashboard({ showLoading = true } = {}) {
-  if (isDashboardRefreshing) {
-    return;
-  }
-  isDashboardRefreshing = true;
-
-  if (showLoading) {
-    renderTableLoading(recentCallsBody, 5, "Loading recent calls...");
-    campaignStatusWidget.innerHTML = "Loading campaigns...";
-    callbackQueueWidget.innerHTML = "Loading callbacks...";
-  }
+async function loadDashboard() {
+  renderTableLoading(recentCallsBody, 5, "Loading recent calls...");
+  campaignStatusWidget.innerHTML = "Loading campaigns...";
+  callbackQueueWidget.innerHTML = "Loading callbacks...";
 
   try {
     const [health, calls, campaigns, callbacks, summaries] = await Promise.all([
@@ -172,21 +165,17 @@ async function loadDashboard({ showLoading = true } = {}) {
       summaryService.listSummaries(),
     ]);
 
-    buildKpiCards({ calls, callbacks, summaries });
+    buildKpiCards({ calls, campaigns, callbacks, summaries });
     renderRecentCalls(calls);
     renderCampaignWidget(campaigns);
     renderCallbackWidget(callbacks);
     refreshButton.dataset.lastStatus = health.status;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load dashboard data.";
-    if (showLoading) {
-      renderTableError(recentCallsBody, 5, message);
-      campaignStatusWidget.innerHTML = errorState(message);
-      callbackQueueWidget.innerHTML = errorState(message);
-    }
+    renderTableError(recentCallsBody, 5, message);
+    campaignStatusWidget.innerHTML = errorState(message);
+    callbackQueueWidget.innerHTML = errorState(message);
     showError(message);
-  } finally {
-    isDashboardRefreshing = false;
   }
 }
 
@@ -197,9 +186,9 @@ bootPage({
 });
 
 refreshButton.addEventListener("click", async () => {
-  await loadDashboard({ showLoading: true });
+  await loadDashboard();
   showSuccess("Dashboard refreshed.");
 });
 
-loadDashboard({ showLoading: true });
-window.setInterval(() => loadDashboard({ showLoading: false }), frontendConfig.refreshIntervals.dashboardMs);
+loadDashboard();
+window.setInterval(loadDashboard, frontendConfig.refreshIntervals.dashboardMs);

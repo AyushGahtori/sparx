@@ -12,7 +12,7 @@ from app.services.post_call_intelligence_service import (
     PostCallIntelligenceService,
     get_post_call_intelligence_service,
 )
-from app.utils.time import utc_now_iso
+from app.utils.time import coerce_utc, utc_now, utc_now_iso
 
 logger = get_logger(__name__)
 
@@ -47,11 +47,11 @@ class PostCallIntelligenceRunnerService:
             await self._recover_incomplete_jobs()
         except AppError as exc:
             if exc.code != "firestore_not_configured":
-                logger.warning("Post-call intelligence recovery failed: %s", exc)
-            else:
-                logger.info("Post-call intelligence Firestore not configured: %s", exc.message)
+                raise
         except Exception as exc:
-            logger.warning("Post-call intelligence recovery skipped due to error: %s", exc)
+            # Firestore transient failures (for example quota exhaustion) should not block API startup.
+            self._last_error = str(exc)
+            logger.warning("Skipping AI recovery on startup due to datastore error: %s", exc)
         self._loop_task = asyncio.create_task(self._scheduler_loop(), name="post-call-intelligence-runner")
         logger.info(
             "Post-call intelligence runner started | max_parallel_jobs=%s | dispatch_interval_seconds=%s",
@@ -129,20 +129,39 @@ class PostCallIntelligenceRunnerService:
 
     async def _dispatch_queued_calls(self) -> None:
         try:
-            queued_calls = await run_in_threadpool(
-                self.call_repository.list_calls_by_ai_processing_statuses,
-                ["queued"],
-                limit_per_status=self.settings.runner_query_limit,
-            )
+            calls = await run_in_threadpool(self.call_repository.list_calls)
         except AppError as exc:
             if exc.code == "firestore_not_configured":
                 return
             raise
-        queued_calls.sort(key=lambda call: call.ended_at or call.created_at)
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.warning("Skipping AI queue dispatch cycle due to datastore error: %s", exc)
+            return
+        queued_calls = [call for call in calls if call.ai_processing_status == "queued"]
+        queued_calls.sort(key=lambda call: coerce_utc(call.ended_at or call.created_at or utc_now()))
 
         available_slots = max(self.settings.ai_max_parallel_jobs - len(self._active_tasks), 0)
         for call_document in queued_calls[:available_slots]:
             self._launch_processing(call_document.call_id)
+        await self._dispatch_pending_meeting_invites(calls)
+
+    async def _dispatch_pending_meeting_invites(self, calls) -> None:
+        pending_calls = [
+            call
+            for call in calls
+            if self.intelligence_service._needs_meeting_invite(call)
+        ]
+        pending_calls.sort(key=lambda call: coerce_utc(call.updated_at or call.ended_at or call.created_at or utc_now()))
+        for call_document in pending_calls[:5]:
+            try:
+                await self.intelligence_service.ensure_meeting_invite(call_document.call_id)
+            except Exception as exc:
+                logger.warning(
+                    "Unable to auto-send meeting invite for call %s: %s",
+                    call_document.call_id,
+                    exc,
+                )
 
     def _launch_processing(self, call_id: str) -> None:
         if call_id in self._active_tasks:
@@ -195,23 +214,37 @@ class PostCallIntelligenceRunnerService:
             raise
 
     async def _recover_incomplete_jobs(self) -> None:
-        calls = await run_in_threadpool(
-            self.call_repository.list_calls_by_ai_processing_statuses,
-            ["processing"],
-            limit_per_status=self.settings.runner_query_limit,
-        )
+        try:
+            calls = await run_in_threadpool(self.call_repository.list_calls)
+        except AppError:
+            raise
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.warning("Unable to recover AI jobs during startup due to datastore error: %s", exc)
+            return
         for call_document in calls:
-            await run_in_threadpool(
-                self.call_repository.update_call,
-                call_document.call_id,
-                {
-                    "ai_processing_status": "queued",
-                    "ai_error": "Recovered after application restart.",
-                },
-            )
-            self._recovered_jobs += 1
+            if call_document.ai_processing_status == "processing":
+                await run_in_threadpool(
+                    self.call_repository.update_call,
+                    call_document.call_id,
+                    {
+                        "ai_processing_status": "queued",
+                        "ai_error": "Recovered after application restart.",
+                    },
+                )
+                self._recovered_jobs += 1
 
     def get_diagnostics(self) -> dict[str, object]:
+        if not self.settings.resolved_run_ai_background_runner:
+            return {
+                "status": "disabled",
+                "loop_running": False,
+                "active_items": 0,
+                "last_cycle_started_at": self._last_cycle_started_at,
+                "last_cycle_completed_at": self._last_cycle_completed_at,
+                "recovered_items": self._recovered_jobs,
+                "last_error": None,
+            }
         status = "healthy" if self._loop_task and not self._loop_task.done() and self._last_error is None else "degraded"
         return {
             "status": status,

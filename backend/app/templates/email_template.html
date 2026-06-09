@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Meeting Invitation - {{ meeting.title }}</title>
+</head>
+<body style="margin:0; padding:0; background:#f5f3ee; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f3ee; padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%;">
+          <tr>
+            <td style="background:#0d0d12; border-radius:20px 20px 0 0; padding:32px 40px; text-align:left;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <p style="margin:0; font-size:22px; font-weight:700; color:#ffffff; letter-spacing:-0.5px;">
+                      Spar<span style="color:#2d6ef7;">x</span>
+                    </p>
+                  </td>
+                  <td align="right">
+                    <span style="display:inline-block; background:rgba(45,110,247,0.25); color:#7ba8ff; font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; padding:5px 12px; border-radius:100px; border:1px solid rgba(45,110,247,0.3);">
+                      Meeting Invite
+                    </span>
+                  </td>
+                </tr>
+              </table>
+              <div style="margin-top:28px;">
+                <p style="margin:0 0 8px 0; font-size:13px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;">You're invited to</p>
+                <h1 style="margin:0; font-size:28px; font-weight:700; color:#ffffff; line-height:1.2;">{{ meeting.title }}</h1>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#ffffff; padding:36px 40px;">
+              <p style="margin:0 0 24px 0; font-size:15px; color:#3d3d4a; line-height:1.7;">
+                Hi there,<br/>
+                <strong>{{ organizer.name }}</strong> has scheduled a meeting and you're invited.
+                Here are the details:
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td width="50%" style="padding:0 8px 12px 0; vertical-align:top;">
+                    <div style="background:#f5f3ee; border-radius:12px; padding:16px;">
+                      <p style="margin:0 0 4px 0; font-size:11px; font-weight:700; color:#7a7a8a; text-transform:uppercase; letter-spacing:0.8px;">Date & Time</p>
+                      <p style="margin:0; font-size:14px; font-weight:600; color:#0d0d12;">{{ meeting.start_datetime }}</p>
+                      <p style="margin:4px 0 0 0; font-size:13px; color:#7a7a8a;">Ends {{ meeting.end_datetime }}</p>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding:0 0 12px 8px; vertical-align:top;">
+                    <div style="background:#f5f3ee; border-radius:12px; padding:16px;">
+                      <p style="margin:0 0 4px 0; font-size:11px; font-weight:700; color:#7a7a8a; text-transform:uppercase; letter-spacing:0.8px;">Duration</p>
+                      <p style="margin:0; font-size:14px; font-weight:600; color:#0d0d12;">{{ meeting.duration_minutes }} minutes</p>
+                      <p style="margin:4px 0 0 0; font-size:13px; color:#7a7a8a;">{{ meeting.timezone }}</p>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td width="50%" style="padding:0 8px 0 0; vertical-align:top;">
+                    <div style="background:#f5f3ee; border-radius:12px; padding:16px;">
+                      <p style="margin:0 0 4px 0; font-size:11px; font-weight:700; color:#7a7a8a; text-transform:uppercase; letter-spacing:0.8px;">Organizer</p>
+                      <p style="margin:0; font-size:14px; font-weight:600; color:#0d0d12;">{{ organizer.name }}</p>
+                      <p style="margin:4px 0 0 0; font-size:13px; color:#7a7a8a;">{{ organizer.email }}</p>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding:0 0 0 8px; vertical-align:top;">
+                    <div style="background:#f5f3ee; border-radius:12px; padding:16px;">
+                      <p style="margin:0 0 4px 0; font-size:11px; font-weight:700; color:#7a7a8a; text-transform:uppercase; letter-spacing:0.8px;">Attendees</p>
+                      {% if meeting.attendees %}
+                        {% for att in meeting.attendees %}
+                          <p style="margin:0; font-size:13px; color:#0d0d12; font-weight:500;">{{ att }}</p>
+                        {% endfor %}
+                      {% else %}
+                        <p style="margin:0; font-size:13px; color:#7a7a8a;">No attendees listed</p>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              {% if meeting.meet_link %}
+              <div style="background:linear-gradient(135deg, #0d0d12 0%, #1a2640 100%); border-radius:16px; padding:24px; text-align:center; margin-bottom:24px;">
+                <p style="margin:0 0 4px 0; font-size:12px; font-weight:600; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;">Google Meet</p>
+                <p style="margin:0 0 20px 0; font-size:20px; font-weight:700; color:#ffffff;">Join the meeting</p>
+                <a href="{{ meeting.meet_link }}"
+                   style="display:inline-block; background:#2d6ef7; color:#ffffff; font-size:15px; font-weight:700; text-decoration:none; padding:14px 32px; border-radius:12px; letter-spacing:0.2px;">
+                  Join Google Meet
+                </a>
+                <p style="margin:16px 0 0 0; font-size:12px; color:rgba(255,255,255,0.4);">
+                  {{ meeting.meet_link }}
+                </p>
+              </div>
+              {% endif %}
+
+              {% if meeting.event_link %}
+              <div style="text-align:center; margin-bottom:24px;">
+                <a href="{{ meeting.event_link }}"
+                   style="display:inline-block; background:#f5f3ee; color:#2d6ef7; font-size:13px; font-weight:600; text-decoration:none; padding:10px 24px; border-radius:10px; border:1.5px solid #e2dfd8;">
+                  View in Google Calendar
+                </a>
+              </div>
+              {% endif %}
+
+              <div style="border-top:1px solid #e2dfd8; padding-top:20px;">
+                <p style="margin:0; font-size:13px; color:#7a7a8a; line-height:1.7;">
+                  This meeting was scheduled via <strong style="color:#0d0d12;">Sparx</strong> - AI-powered meeting scheduler.<br/>
+                  Calendar invite has been added to your Google Calendar automatically.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#0d0d12; border-radius:0 0 20px 20px; padding:24px 40px; text-align:center;">
+              <p style="margin:0 0 4px 0; font-size:13px; font-weight:600; color:#ffffff;">
+                Spar<span style="color:#2d6ef7;">x</span> - Smart Meeting Scheduler
+              </p>
+              <p style="margin:0; font-size:12px; color:rgba(255,255,255,0.35);">
+                Powered by Gemini AI &amp; Google Calendar API
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

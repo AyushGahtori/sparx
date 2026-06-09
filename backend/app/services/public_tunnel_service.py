@@ -21,6 +21,7 @@ class PublicTunnelService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.process: subprocess.Popen | None = None
+        self.active_tunnel_url: str | None = None
         self.stderr_log_path = self.settings.logs_dir / "cloudflared.err.log"
         self.stdout_log_path = self.settings.logs_dir / "cloudflared.out.log"
 
@@ -31,11 +32,15 @@ class PublicTunnelService:
         if self.settings.normalized_public_base_url and not self.settings.uses_cloudflare_quick_tunnel:
             return self.settings.normalized_public_base_url
 
+        if self._has_active_quick_tunnel():
+            return self.settings.normalized_public_base_url
+
         if self.settings.normalized_public_base_url and self.is_public_base_url_reachable():
             return self.settings.normalized_public_base_url
 
         tunnel_url = self._start_cloudflared_quick_tunnel(wait_until_reachable=wait_until_reachable)
         self.settings.public_base_url = tunnel_url
+        self.active_tunnel_url = tunnel_url
         self._persist_public_base_url(tunnel_url)
         logger.info("Cloudflare quick tunnel started and PUBLIC_BASE_URL set for this backend process: %s", tunnel_url)
         return tunnel_url
@@ -57,6 +62,7 @@ class PublicTunnelService:
         if not self.is_public_base_url_reachable():
             if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
                 self.ensure_started_for_local_development()
+                return
 
         if not self.is_public_base_url_reachable():
             raise AppError(
@@ -103,6 +109,8 @@ class PublicTunnelService:
             [
                 str(executable),
                 "tunnel",
+                "--protocol",
+                self.settings.cloudflared_protocol.strip().lower(),
                 "--url",
                 f"http://127.0.0.1:{self.settings.app_port}",
             ],
@@ -186,6 +194,7 @@ class PublicTunnelService:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+        self.active_tunnel_url = None
 
     def _has_active_quick_tunnel(self) -> bool:
         return bool(
@@ -194,6 +203,7 @@ class PublicTunnelService:
             and self.settings.uses_cloudflare_quick_tunnel
             and self.process
             and self.process.poll() is None
+            and self.active_tunnel_url
         )
 
     async def stop(self) -> None:

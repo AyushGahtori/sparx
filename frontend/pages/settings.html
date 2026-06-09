@@ -36,12 +36,24 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
+                  <h2>Google OAuth</h2>
+                  <p class="panel-subtitle">Calendar authorization for meeting links and invites.</p>
+                </div>
+              </div>
+              <div id="google-oauth-panel" class="loading-state">Checking Google connection...</div>
+            </section>
+          </div>
+
+          <div class="page-grid equal">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
                   <h2>Operator Links</h2>
                   <p class="panel-subtitle">Useful local entry points and recovery shortcuts.</p>
                 </div>
               </div>
               <div class="widget-list">
-                <a class="widget-item" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
+                <a id="api-docs-link" class="widget-item" href="#" target="_blank" rel="noreferrer">
                   <div class="widget-item-title">FastAPI Docs</div>
                   <div class="detail-text">Inspect and test all backend endpoints.</div>
                 </a>
@@ -59,6 +71,29 @@
                 </a>
               </div>
             </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Configuration Map</h2>
+                  <p class="panel-subtitle">Enterprise settings grouped by operational ownership.</p>
+                </div>
+              </div>
+              <div class="widget-list">
+                <div class="widget-item">
+                  <div class="widget-item-header"><span class="widget-item-title">General Settings</span><span class="status-pill ready">Ready</span></div>
+                  <div class="detail-text">App label, environment, request timeout, and refresh cadence.</div>
+                </div>
+                <div class="widget-item">
+                  <div class="widget-item-header"><span class="widget-item-title">Integrations</span><span class="status-pill connected">Connected</span></div>
+                  <div class="detail-text">Firebase, Twilio, Deepgram, Gemma, and Google OAuth health.</div>
+                </div>
+                <div class="widget-item">
+                  <div class="widget-item-header"><span class="widget-item-title">API Status & Logs</span><span class="status-pill scheduled">Observed</span></div>
+                  <div class="detail-text">Backend diagnostics, queue health, and local operator log entry points.</div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </main>
@@ -68,6 +103,7 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
+  <script src="../runtime-config.js"></script>
   <script type="module" src="../js/settings.js"></script>
 </body>
 </html>

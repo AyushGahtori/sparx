@@ -95,6 +95,7 @@ class SummaryListItemResponse(BaseModel):
     call_id: str
     lead_name: str
     phone: str
+    email: str | None = None
     call_date: datetime | None = None
     campaign_id: str | None = None
     final_status: str | None = None

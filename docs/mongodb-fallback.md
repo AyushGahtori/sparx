@@ -21,7 +21,7 @@ MONGODB_DATABASE=sparx
 
 4. Start the backend normally.
 
-MongoDB collections are created automatically when records are written. The backend also creates useful indexes for calls, callbacks, campaigns, campaign contacts, and scheduled calls.
+MongoDB collections are created automatically when records are written.
 
 ## Collections
 
@@ -29,7 +29,7 @@ MongoDB collections are created automatically when records are written. The back
 - `callbacks`
 - `campaigns`
 - `campaign_contacts`
-- `scheduled_calls`
+- `meetings`
 
 ## Behavior
 

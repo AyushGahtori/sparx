@@ -13,10 +13,18 @@ export const campaignService = {
     return apiService.get(`/campaigns/${campaignId}/contacts`);
   },
 
-  previewCsv(file) {
+  getCampaignData(campaignId) {
+    return apiService.get(`/campaigns/${campaignId}/data`);
+  },
+
+  previewLeads(file) {
     const formData = new FormData();
     formData.append("file", file);
-    return apiService.postFormData("/campaigns/preview-csv", formData);
+    return apiService.postFormData("/campaigns/preview-leads", formData);
+  },
+
+  previewCsv(file) {
+    return this.previewLeads(file);
   },
 
   createCampaign(payload) {
