@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+:root {
+  --sparx-page: #f0f0f0;
+  --sparx-canvas: #ffffff;
+  --sparx-panel: #f3f0ec;
+  --sparx-card: #e5dcc0;
+  --sparx-card-strong: #d8c8b7;
+  --sparx-night: #1c1b2d;
+  --sparx-olive: #6f5200;
+  --sparx-olive-dark: #523d00;
+  --sparx-yellow: #f1e72f;
+  --sparx-green: #24d64d;
+  --sparx-red: #ff584e;
+  --sparx-ink: #242424;
+  --sparx-muted: #67635d;
+  --sparx-line: rgba(64, 58, 48, 0.12);
+  --sparx-line-strong: rgba(64, 58, 48, 0.28);
+  --sparx-brand-soft: #efe5cf;
+  --background: var(--sparx-page);
+  --foreground: var(--sparx-ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(241, 231, 47, 0.5);
+  outline-offset: 2px;
+}
+
+.sparx-grid {
+  background-image:
+    linear-gradient(rgba(111, 82, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(111, 82, 0, 0.045) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
