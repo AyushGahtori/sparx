@@ -1,6 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
-from app.schemas.call import CallDeleteResponse, CallResponse, CallStatusUpdateRequest, IndividualCallRequest
+from app.schemas.call import (
+    CallDeleteResponse,
+    CallResponse,
+    CallStatusUpdateRequest,
+    IndividualCallRequest,
+    MeetingConfirmationIntentRequest,
+    MeetingConfirmationIntentResponse,
+)
 from app.schemas.intelligence import SummaryDetailResponse, TranscriptIngestionRequest
 from app.services.call_service import CallService, get_call_service
 from app.services.post_call_intelligence_runner_service import (
@@ -20,6 +27,30 @@ async def list_calls(
     call_service: CallService = Depends(get_call_service),
 ) -> list[CallResponse]:
     return await call_service.list_calls()
+
+
+@router.get("/recordings", response_model=list[CallResponse])
+async def list_call_recordings(
+    call_service: CallService = Depends(get_call_service),
+) -> list[CallResponse]:
+    return await call_service.list_recorded_calls()
+
+
+@router.get("/{call_id}/recording/audio")
+async def get_call_recording_audio(
+    call_id: str,
+    call_service: CallService = Depends(get_call_service),
+) -> Response:
+    content, media_type, filename = await call_service.fetch_recording_audio(call_id)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, max-age=300",
+            "X-Skip-Envelope": "1",
+        },
+    )
 
 
 @router.get("/{call_id}", response_model=CallResponse)
@@ -74,3 +105,12 @@ async def delete_call(
     call_service: CallService = Depends(get_call_service),
 ) -> CallDeleteResponse:
     return await call_service.delete_call(call_id)
+
+
+@router.post("/{call_id}/meeting-intent", response_model=MeetingConfirmationIntentResponse)
+async def handle_meeting_confirmation_intent(
+    call_id: str,
+    payload: MeetingConfirmationIntentRequest,
+    call_service: CallService = Depends(get_call_service),
+) -> MeetingConfirmationIntentResponse:
+    return await call_service.handle_meeting_confirmation_intent(call_id, payload)

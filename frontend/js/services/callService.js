@@ -9,16 +9,20 @@ export const callService = {
     return apiService.get("/calls");
   },
 
+  listRecordings() {
+    return apiService.get("/calls/recordings");
+  },
+
   getCall(callId) {
     return apiService.get(`/calls/${callId}`);
   },
 
-  startIndividualCall(payload) {
-    return apiService.post("/calls/individual", payload);
+  getRecordingAudio(callId) {
+    return apiService.getBlob(`/calls/${callId}/recording/audio`);
   },
 
-  updateCallStatus(callId, payload) {
-    return apiService.put(`/calls/${callId}/status`, payload);
+  startIndividualCall(payload) {
+    return apiService.post("/calls/individual", payload);
   },
 
   deleteCall(callId) {

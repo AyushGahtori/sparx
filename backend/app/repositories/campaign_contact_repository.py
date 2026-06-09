@@ -7,7 +7,7 @@ from app.database.fallback_utils import should_use_mongo_fallback
 from app.database.firestore import FirestoreService, get_firestore_service
 from app.database.mongo_fallback import MongoFallbackService, get_mongo_fallback_service
 from app.models.firestore_documents import CampaignContactDocument
-from app.utils.time import utc_now
+from app.utils.time import coerce_utc, utc_now
 
 
 class CampaignContactRepository:
@@ -31,23 +31,15 @@ class CampaignContactRepository:
     def _collection(self):
         return self._client().collection(self.collection_name)
 
-    def _document_from_payload(self, payload: dict[str, Any], document_id: str | None = None) -> CampaignContactDocument:
-        if document_id:
-            payload.setdefault("contact_id", document_id)
-            payload.setdefault("id", document_id)
-        else:
-            payload.setdefault("contact_id", payload.get("_id"))
-            payload.setdefault("id", payload.get("_id"))
-        return CampaignContactDocument.model_validate(payload)
-
     def create_contacts(self, contact_documents: list[CampaignContactDocument]) -> list[CampaignContactDocument]:
         try:
             client = self._client()
+            collection = self._collection()
             for index in range(0, len(contact_documents), self._batch_size):
                 batch = client.batch()
                 chunk = contact_documents[index : index + self._batch_size]
                 for contact_document in chunk:
-                    reference = self._collection().document(contact_document.contact_id)
+                    reference = collection.document(contact_document.contact_id)
                     batch.set(reference, contact_document.model_dump(exclude_none=True))
                 batch.commit()
         except Exception as exc:
@@ -65,29 +57,31 @@ class CampaignContactRepository:
     def get_contact(self, contact_id: str) -> CampaignContactDocument:
         try:
             snapshot = self._collection().document(contact_id).get()
-            if snapshot.exists:
-                payload = snapshot.to_dict() or {}
-                payload.setdefault("contact_id", snapshot.id)
-                payload.setdefault("id", snapshot.id)
-                self.mongo_fallback_service.upsert(self.collection_name, contact_id, payload)
-                return CampaignContactDocument.model_validate(payload)
+            if not snapshot.exists:
+                raise AppError(
+                    status_code=404,
+                    code="campaign_contact_not_found",
+                    message=f"Campaign contact '{contact_id}' was not found.",
+                )
+
+            payload = snapshot.to_dict() or {}
+            payload.setdefault("contact_id", snapshot.id)
+            payload.setdefault("id", snapshot.id)
+            self.mongo_fallback_service.upsert(self.collection_name, contact_id, payload)
+            return CampaignContactDocument.model_validate(payload)
+        except AppError as exc:
+            if exc.code not in {"firestore_not_configured", "campaign_contact_not_found"}:
+                raise
+            return self._get_contact_from_mongo_or_raise(contact_id)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-
-        payload = self.mongo_fallback_service.get(self.collection_name, contact_id)
-        if payload:
-            return self._document_from_payload(payload, contact_id)
-        raise AppError(
-            status_code=404,
-            code="campaign_contact_not_found",
-            message=f"Campaign contact '{contact_id}' was not found.",
-        )
+            return self._get_contact_from_mongo_or_raise(contact_id)
 
     def list_contacts_by_campaign(self, campaign_id: str) -> list[CampaignContactDocument]:
+        contacts: list[CampaignContactDocument] = []
         try:
-            contacts: list[CampaignContactDocument] = []
-            snapshots = self._collection().where(filter=firestore.FieldFilter("campaign_id", "==", campaign_id)).stream()
+            snapshots = self._collection().where("campaign_id", "==", campaign_id).stream()
             for snapshot in snapshots:
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("contact_id", snapshot.id)
@@ -97,12 +91,12 @@ class CampaignContactRepository:
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            contacts = [
-                self._document_from_payload(payload)
-                for payload in self.mongo_fallback_service.list(self.collection_name, {"campaign_id": campaign_id})
-            ]
+            for payload in self.mongo_fallback_service.list(self.collection_name, {"campaign_id": campaign_id}):
+                payload.setdefault("contact_id", payload.get("contact_id") or payload.get("_id"))
+                payload.setdefault("id", payload.get("id") or payload.get("_id"))
+                contacts.append(CampaignContactDocument.model_validate(payload))
 
-        contacts.sort(key=lambda contact: contact.created_at or utc_now())
+        contacts.sort(key=lambda contact: coerce_utc(contact.created_at or utc_now()))
         return contacts
 
     def update_contact(self, contact_id: str, updates: dict[str, Any]) -> CampaignContactDocument:
@@ -120,15 +114,16 @@ class CampaignContactRepository:
         if not updates_by_contact_id:
             return
 
+        contact_ids = list(updates_by_contact_id.keys())
         try:
             client = self._client()
-            contact_ids = list(updates_by_contact_id.keys())
+            collection = self._collection()
             for index in range(0, len(contact_ids), self._batch_size):
                 batch = client.batch()
                 chunk_ids = contact_ids[index : index + self._batch_size]
                 for contact_id in chunk_ids:
                     self.get_contact(contact_id)
-                    reference = self._collection().document(contact_id)
+                    reference = collection.document(contact_id)
                     payload = {**updates_by_contact_id[contact_id], "updated_at": utc_now()}
                     batch.set(reference, payload, merge=True)
                 batch.commit()
@@ -137,6 +132,7 @@ class CampaignContactRepository:
                 raise
 
         for contact_id, updates in updates_by_contact_id.items():
+            self.get_contact(contact_id)
             self.mongo_fallback_service.upsert(
                 self.collection_name,
                 contact_id,
@@ -165,11 +161,12 @@ class CampaignContactRepository:
 
         try:
             client = self._client()
+            collection = self._collection()
             for index in range(0, len(contacts), self._batch_size):
                 batch = client.batch()
                 chunk = contacts[index : index + self._batch_size]
                 for contact in chunk:
-                    batch.delete(self._collection().document(contact.contact_id))
+                    batch.delete(collection.document(contact.contact_id))
                 batch.commit()
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -177,6 +174,18 @@ class CampaignContactRepository:
 
         for contact in contacts:
             self.mongo_fallback_service.delete(self.collection_name, contact.contact_id)
+
+    def _get_contact_from_mongo_or_raise(self, contact_id: str) -> CampaignContactDocument:
+        payload = self.mongo_fallback_service.get(self.collection_name, contact_id)
+        if not payload:
+            raise AppError(
+                status_code=404,
+                code="campaign_contact_not_found",
+                message=f"Campaign contact '{contact_id}' was not found.",
+            )
+        payload.setdefault("contact_id", contact_id)
+        payload.setdefault("id", contact_id)
+        return CampaignContactDocument.model_validate(payload)
 
 
 def get_campaign_contact_repository() -> CampaignContactRepository:

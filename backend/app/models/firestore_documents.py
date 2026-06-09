@@ -1,15 +1,15 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FirestoreDocument(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str | None = Field(default=None, description="Firestore document identifier.")
-    created_at: datetime | None = Field(default=None, description="UTC creation timestamp.")
-    updated_at: datetime | None = Field(default=None, description="UTC last update timestamp.")
+    created_at: datetime | None = Field(default=None, description="Asia/Kolkata creation timestamp.")
+    updated_at: datetime | None = Field(default=None, description="Asia/Kolkata last update timestamp.")
 
 
 class TranscriptEntryDocument(BaseModel):
@@ -31,7 +31,7 @@ class UserDocument(FirestoreDocument):
 class ProjectDocument(FirestoreDocument):
     name: str
     description: str | None = None
-    timezone: str = "UTC"
+    timezone: str = "Asia/Kolkata"
     owner_user_id: str
     status: Literal["active", "inactive", "archived"] = "active"
     default_twilio_number: str | None = None
@@ -39,9 +39,21 @@ class ProjectDocument(FirestoreDocument):
 
 
 class CallDocument(FirestoreDocument):
+    conversation_stage: Literal[
+        "NEW",
+        "PRODUCT_INTRO",
+        "QUALIFICATION",
+        "INTERESTED",
+        "MEETING_PENDING",
+        "MEETING_BOOKED",
+    ] = "NEW"
+    product_intro_completed: bool = False
+    previous_call_summary: str | None = None
+    meeting_booked: bool = False
     call_id: str
     lead_name: str
     phone: str
+    email: str | None = None
     company: str | None = None
     city: str | None = None
     role: str | None = None
@@ -78,6 +90,13 @@ class CallDocument(FirestoreDocument):
     ended_at: datetime | None = None
     duration: int | None = None
     twilio_call_sid: str | None = None
+    recording_sid: str | None = None
+    recording_url: str | None = None
+    recording_status: str | None = None
+    recording_duration: int | None = None
+    recording_channels: int | None = None
+    recording_source: str | None = None
+    recording_available_at: datetime | None = None
     deepgram_agent_id: str | None = None
     deepgram_request_id: str | None = None
     transcript: list[TranscriptEntryDocument] = Field(default_factory=list)
@@ -102,6 +121,7 @@ class CallDocument(FirestoreDocument):
     ai_metadata: dict[str, Any] = Field(default_factory=dict)
     notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_log: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CampaignDocument(FirestoreDocument):
@@ -114,6 +134,7 @@ class CampaignDocument(FirestoreDocument):
     language: str
     priority: Literal["low", "medium", "high"] = "medium"
     schedule_type: Literal["immediate", "scheduled"] = "immediate"
+    dispatch_mode: Literal["parallel", "one_by_one"] = "parallel"
     status: Literal["draft", "scheduled", "running", "paused", "completed", "failed", "cancelled"] = "draft"
     total_contacts: int = 0
     completed_calls: int = 0
@@ -130,6 +151,7 @@ class CampaignDocument(FirestoreDocument):
     completed_at: datetime | None = None
     notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_log: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CampaignContactDocument(FirestoreDocument):
@@ -139,8 +161,13 @@ class CampaignContactDocument(FirestoreDocument):
     phone: str
     company: str | None = None
     city: str | None = None
+    state: str | None = None
+    country: str | None = None
     role: str | None = None
+    email: str | None = None
+    website: str | None = None
     interest: str | None = None
+    notes: str | None = None
     status: Literal[
         "pending",
         "dispatching",
@@ -162,6 +189,10 @@ class CampaignContactDocument(FirestoreDocument):
     call_sid: str | None = None
     call_id: str | None = None
     latest_call_status: str | None = None
+    source_row_number: int | None = None
+    last_attempted_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    event_log: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CallbackDocument(FirestoreDocument):
@@ -199,62 +230,60 @@ class CallbackDocument(FirestoreDocument):
     next_retry_time: datetime | None = None
     requested_time_confidence: Literal["high", "medium", "low"] = "medium"
     adjustment_reason: str | None = None
-    source: Literal["individual", "campaign", "webhook", "manual", "action"]
+    source: Literal["individual", "campaign", "webhook", "manual"]
     last_attempted_at: datetime | None = None
     completed_at: datetime | None = None
     last_call_id: str | None = None
     last_call_sid: str | None = None
     notes: str | None = None
+    conversation_stage: Literal[
+        "NEW",
+        "PRODUCT_INTRO",
+        "QUALIFICATION",
+        "INTERESTED",
+        "MEETING_PENDING",
+        "MEETING_BOOKED",
+    ] = "NEW"
+    product_intro_completed: bool = False
+    previous_call_summary: str | None = None
+    callback_requested: bool = True
+    callback_time: datetime | None = None
+    meeting_booked: bool = False
+    next_action: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_log: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def normalize_legacy_source(cls, value: str) -> str:
+        if value == "action":
+            return "webhook"
+        return value
 
 
 class MeetingDocument(FirestoreDocument):
-    project_id: str
-    call_id: str
+    meeting_id: str
+    project_id: str | None = None
+    call_id: str | None = None
     title: str
     attendee_name: str | None = None
     attendee_email: str | None = None
+    attendees: list[str] = Field(default_factory=list)
     scheduled_for: datetime
-    timezone: str = "UTC"
+    ends_at: datetime | None = None
+    timezone: str = "Asia/Kolkata"
     status: Literal["pending", "confirmed", "completed", "canceled"] = "pending"
     calendar_provider: Literal["google", "outlook", "manual"] = "manual"
     external_meeting_id: str | None = None
-
-
-class ScheduledCallDocument(FirestoreDocument):
-    scheduled_call_id: str
-    type: Literal["ai_callback", "executive_callback"]
-    name: str
-    phone: str
-    scheduled_time: datetime
-    timezone: str = "Asia/Kolkata"
-    status: Literal[
-        "scheduled",
-        "queued",
-        "in_progress",
-        "completed",
-        "failed",
-        "cancelled",
-        "rescheduled",
-        "missed",
-    ] = "scheduled"
-    callback_id: str | None = None
-    call_id: str | None = None
-    call_type: Literal["individual", "campaign"] | None = None
-    campaign_id: str | None = None
-    contact_id: str | None = None
-    assigned_executive: str | None = None
-    communication_mode: Literal["phone_call", "google_meet"] = "phone_call"
-    attendee_email: str | None = None
-    google_meet_link: str | None = None
-    google_calendar_event_id: str | None = None
-    google_calendar_event_link: str | None = None
-    invite_email_status: Literal["not_required", "pending", "sent", "failed"] = "not_required"
-    invite_error: str | None = None
-    requested_time_raw: str | None = None
-    notes: str | None = None
-    source: Literal["schedule_call_action"] = "schedule_call_action"
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    event_link: str | None = None
+    meet_link: str | None = None
+    description: str | None = None
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    cancel_reason: str | None = None
+    cancellation_callback_id: str | None = None
+    calendar_event_removed: bool = False
+    raw_event: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentDocument(FirestoreDocument):

@@ -62,6 +62,7 @@ function applySearchFilter(summaries) {
     const haystack = [
       summary.lead_name,
       summary.phone,
+      summary.email,
       summary.summary,
       summary.next_action,
       summary.call_outcome,
@@ -145,12 +146,34 @@ function openSummaryDetail(detail) {
       </div>
 
       <div class="detail-list" style="margin-top: 1rem;">
+        <div class="detail-row"><span class="detail-label">Lead Name</span><span>${escapeHtml(detail.lead_name || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Phone</span><span>${escapeHtml(detail.phone || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Email ID</span><span>${escapeHtml(detail.email || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Company</span><span>${escapeHtml(detail.company || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">City</span><span>${escapeHtml(detail.city || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Role</span><span>${escapeHtml(detail.role || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Interest</span><span>${escapeHtml(detail.interest || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Call Date</span><span>${escapeHtml(detail.call_date || detail.ended_at ? formatDateTime(detail.call_date || detail.ended_at) : "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Status</span><span>${escapeHtml(formatStatusLabel(detail.status || "-"))}</span></div>
+        <div class="detail-row"><span class="detail-label">Final Status</span><span>${escapeHtml(formatStatusLabel(detail.final_status || "-"))}</span></div>
+        <div class="detail-row"><span class="detail-label">Call Type</span><span>${escapeHtml(detail.call_type || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Campaign ID</span><span>${escapeHtml(detail.campaign_id || "Manual")}</span></div>
+        <div class="detail-row"><span class="detail-label">Agent</span><span>${escapeHtml(detail.agent_name || "-")} (${escapeHtml(detail.agent_id || "-")})</span></div>
+        <div class="detail-row"><span class="detail-label">Objective</span><span>${escapeHtml(detail.call_objective || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Language</span><span>${escapeHtml(detail.language || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Priority</span><span>${escapeHtml(detail.priority || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Summary</span><span>${escapeHtml(detail.summary || "No summary available.")}</span></div>
+        <div class="detail-row"><span class="detail-label">Meeting Time</span><span>${escapeHtml(detail.meeting_time || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Next Action</span><span>${escapeHtml(detail.next_action || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Short Notes</span><span>${escapeHtml(detail.short_notes || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Lead Reason</span><span>${escapeHtml(detail.lead_reason || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Outcome Reason</span><span>${escapeHtml(detail.outcome_reason || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Objections</span><span>${detail.objections.length ? detail.objections.map((item) => escapeHtml(item)).join(", ") : "No objections detected."}</span></div>
+        <div class="detail-row"><span class="detail-label">Retry Count</span><span>${escapeHtml(String(detail.retry_count ?? 0))}</span></div>
+        <div class="detail-row"><span class="detail-label">Next Auto Call</span><span>${escapeHtml(detail.next_retry_time ? formatDateTime(detail.next_retry_time) : "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Processed At</span><span>${escapeHtml(detail.processed_at ? formatDateTime(detail.processed_at) : "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">AI Status</span><span>${escapeHtml(formatStatusLabel(detail.ai_processing_status || "-"))}</span></div>
+        <div class="detail-row"><span class="detail-label">Call ID</span><span>${escapeHtml(detail.call_id || "-")}</span></div>
       </div>
 
       <h3 style="margin-top: 1.25rem;">Transcript Preview</h3>

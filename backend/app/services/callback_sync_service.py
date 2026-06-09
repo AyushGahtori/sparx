@@ -28,8 +28,7 @@ logger = get_logger(__name__)
 class CallbackSyncService:
     open_statuses = {"scheduled", "queued", "in_progress", "rescheduled", "failed"}
     active_execution_statuses = {"initiated", "ringing", "answered", "in_progress"}
-    callback_creation_statuses = {"callback_requested", "meeting_requested", "busy", "no_answer"}
-
+    callback_creation_statuses = {"callback_requested", "busy", "no_answer"}
     def __init__(
         self,
         callback_repository: CallbackRepository,
@@ -63,13 +62,9 @@ class CallbackSyncService:
             return None
 
         if previous_call is not None and previous_call.status == updated_call.status:
-            can_create_meeting_confirmation = (
-                updated_call.status == "meeting_requested"
-                and not updated_call.callback_id
-                and bool(updated_call.meeting_time)
-                and updated_call.meeting_time != previous_call.meeting_time
-            )
-            if not can_create_meeting_confirmation:
+            # Allow follow-up creation when AI enriches a final call with scheduling text
+            # while the lifecycle status itself remains unchanged.
+            if not self._has_new_followup_scheduling_signal(previous_call, updated_call):
                 return None
 
         if (
@@ -97,7 +92,12 @@ class CallbackSyncService:
             call_document.call_id,
         )
         if existing_callback is not None and existing_callback.status in self.open_statuses:
-            return existing_callback
+            return await self._reschedule_existing_origin_callback(
+                existing_callback,
+                call_document=call_document,
+                requested_time_raw=requested_time_raw,
+                source=source,
+            )
 
         callback_source, callback_reason = self._derive_callback_reason(call_document)
         callback_agent_id = "follow_up_agent" if call_document.status == "meeting_requested" else call_document.agent_id
@@ -154,11 +154,26 @@ class CallbackSyncService:
             created_at=created_at,
             updated_at=created_at,
             notes=call_document.notes,
+            conversation_stage=self._resolve_stage_from_call(call_document),
+            product_intro_completed=bool(call_document.product_intro_completed),
+            previous_call_summary=call_document.summary,
+            callback_requested=True,
+            callback_time=time_resolution.normalized_callback_time,
+            meeting_booked=bool(call_document.meeting_booked),
+            next_action=call_document.next_action,
             metadata={
                 "origin_status": call_document.status,
                 "origin_final_status": call_document.final_status,
                 "origin_source": source,
                 "parser_strategy": time_resolution.parser_strategy,
+                "conversation_state": self._build_conversation_state_payload(
+                    call_document=call_document,
+                    callback_time=time_resolution.normalized_callback_time,
+                ),
+                "lead_profile": {
+                    **deepcopy(call_document.metadata.get("lead_profile", {})),
+                    **({"email": call_document.email} if call_document.email else {}),
+                },
                 **(
                     {"campaign_context": deepcopy(call_document.metadata.get("campaign_context", {}))}
                     if call_document.metadata.get("campaign_context")
@@ -185,6 +200,63 @@ class CallbackSyncService:
         self._kick_runner()
         return created_callback
 
+    async def _reschedule_existing_origin_callback(
+        self,
+        existing_callback: CallbackDocument,
+        *,
+        call_document: CallDocument,
+        requested_time_raw: str | None,
+        source: str,
+    ) -> CallbackDocument:
+        if existing_callback.status in {"queued", "in_progress"}:
+            return existing_callback
+
+        has_timing_signal = bool(requested_time_raw or call_document.next_action or call_document.callback_time or call_document.notes)
+        if not has_timing_signal:
+            return existing_callback
+
+        time_resolution = self._resolve_callback_time(call_document, requested_time_raw=requested_time_raw)
+        updates = {
+            "status": "rescheduled" if existing_callback.status != "scheduled" else "scheduled",
+            "requested_time_raw": time_resolution.requested_time_raw,
+            "normalized_callback_time": time_resolution.normalized_callback_time,
+            "next_retry_time": time_resolution.normalized_callback_time,
+            "timezone": time_resolution.timezone,
+            "requested_time_confidence": time_resolution.requested_time_confidence,
+            "adjustment_reason": time_resolution.adjustment_reason,
+            "callback_time": time_resolution.normalized_callback_time,
+            "next_action": call_document.next_action,
+            "previous_call_summary": call_document.summary or existing_callback.previous_call_summary,
+            "conversation_stage": self._resolve_stage_from_call(call_document),
+            "product_intro_completed": bool(call_document.product_intro_completed),
+        }
+        metadata = deepcopy(existing_callback.metadata)
+        metadata["parser_strategy"] = time_resolution.parser_strategy
+        metadata["origin_source"] = source
+        metadata["conversation_state"] = self._build_conversation_state_payload(
+            call_document=call_document,
+            callback_time=time_resolution.normalized_callback_time,
+        )
+        updates["metadata"] = metadata
+
+        updated_callback = await run_in_threadpool(
+            self.callback_repository.update_callback,
+            existing_callback.callback_id,
+            updates,
+        )
+        await self.append_event(
+            existing_callback.callback_id,
+            event_type="callback_rescheduled_from_call",
+            message="Callback timing was updated from the call's requested follow-up time.",
+            payload={
+                "call_id": call_document.call_id,
+                "origin_source": source,
+                "requested_time_raw": time_resolution.requested_time_raw,
+            },
+        )
+        self._kick_runner()
+        return updated_callback
+
     async def _merge_duplicate_callback(
         self,
         duplicate_callback: CallbackDocument,
@@ -200,11 +272,17 @@ class CallbackSyncService:
             "call_id": call_document.call_id,
             "campaign_id": call_document.campaign_id,
             "contact_id": call_document.contact_id,
+            "conversation_stage": self._resolve_stage_from_call(call_document),
+            "product_intro_completed": bool(call_document.product_intro_completed),
+            "previous_call_summary": call_document.summary,
+            "callback_requested": True,
+            "meeting_booked": bool(call_document.meeting_booked),
+            "next_action": call_document.next_action,
         }
 
         if self._priority_rank(priority) < self._priority_rank(duplicate_callback.priority):
             updates["priority"] = priority
-        if time_resolution.normalized_callback_time < duplicate_callback.normalized_callback_time:
+        if coerce_utc(time_resolution.normalized_callback_time) < coerce_utc(duplicate_callback.normalized_callback_time):
             updates["normalized_callback_time"] = time_resolution.normalized_callback_time
             updates["next_retry_time"] = time_resolution.normalized_callback_time
             updates["requested_time_raw"] = time_resolution.requested_time_raw
@@ -213,10 +291,19 @@ class CallbackSyncService:
         if callback_source in {"individual", "campaign"} and duplicate_callback.source == "webhook":
             updates["source"] = callback_source
             updates["callback_reason"] = callback_reason
+        merged_metadata = deepcopy(duplicate_callback.metadata)
+        merged_metadata["lead_profile"] = {
+            **deepcopy(merged_metadata.get("lead_profile", {})),
+            **deepcopy(call_document.metadata.get("lead_profile", {})),
+            **({"email": call_document.email} if call_document.email else {}),
+        }
         if call_document.metadata.get("campaign_context"):
-            merged_metadata = deepcopy(duplicate_callback.metadata)
             merged_metadata["campaign_context"] = deepcopy(call_document.metadata.get("campaign_context", {}))
-            updates["metadata"] = merged_metadata
+        updates["metadata"] = merged_metadata
+        updates["metadata"]["conversation_state"] = self._build_conversation_state_payload(
+            call_document=call_document,
+            callback_time=updates.get("normalized_callback_time", duplicate_callback.normalized_callback_time),
+        )
 
         merged_callback = await run_in_threadpool(
             self.callback_repository.update_callback,
@@ -258,6 +345,11 @@ class CallbackSyncService:
         updates: dict[str, object] = {
             "last_call_id": call_document.call_id,
             "last_call_sid": call_document.twilio_call_sid,
+            "conversation_stage": self._resolve_stage_from_call(call_document),
+            "product_intro_completed": bool(call_document.product_intro_completed),
+            "previous_call_summary": call_document.summary or callback_document.previous_call_summary,
+            "meeting_booked": bool(call_document.meeting_booked),
+            "next_action": call_document.next_action,
         }
         now = utc_now()
 
@@ -278,23 +370,33 @@ class CallbackSyncService:
             updates["requested_time_confidence"] = time_resolution.requested_time_confidence
             updates["adjustment_reason"] = time_resolution.adjustment_reason
             updates["last_attempted_at"] = now
+            updates["callback_requested"] = True
+            updates["callback_time"] = time_resolution.normalized_callback_time
         elif call_document.status in {"busy", "no_answer", "failed"}:
-            retry_decision = self.retry_service.build_retry_decision(
-                callback_document.retry_count,
-                "failed",
-                now,
-            )
-            updates["retry_count"] = retry_decision.retry_count
-            updates["last_attempted_at"] = now
-            if retry_decision.next_retry_time is not None:
-                updates["status"] = "rescheduled"
-                updates["next_retry_time"] = retry_decision.next_retry_time
-                updates["normalized_callback_time"] = coerce_utc(retry_decision.next_retry_time)
-                updates["adjustment_reason"] = "Callback retry was scheduled automatically after a failed attempt."
-            else:
+            if callback_document.metadata.get("one_time") or callback_document.metadata.get("max_attempts") == 1:
+                updates["retry_count"] = callback_document.retry_count + 1
+                updates["last_attempted_at"] = now
                 updates["status"] = "missed"
                 updates["next_retry_time"] = None
                 updates["completed_at"] = now
+                updates["adjustment_reason"] = "One-time callback attempt finished without retry."
+            else:
+                retry_decision = self.retry_service.build_retry_decision(
+                    callback_document.retry_count,
+                    "failed",
+                    now,
+                )
+                updates["retry_count"] = retry_decision.retry_count
+                updates["last_attempted_at"] = now
+                if retry_decision.next_retry_time is not None:
+                    updates["status"] = "rescheduled"
+                    updates["next_retry_time"] = retry_decision.next_retry_time
+                    updates["normalized_callback_time"] = coerce_utc(retry_decision.next_retry_time)
+                    updates["adjustment_reason"] = "Callback retry was scheduled automatically after a failed attempt."
+                else:
+                    updates["status"] = "missed"
+                    updates["next_retry_time"] = None
+                    updates["completed_at"] = now
         else:
             return callback_document
 
@@ -305,6 +407,16 @@ class CallbackSyncService:
             self.callback_repository.update_callback,
             callback_document.callback_id,
             updates,
+        )
+        metadata = deepcopy(updated_callback.metadata)
+        metadata["conversation_state"] = self._build_conversation_state_payload(
+            call_document=call_document,
+            callback_time=updated_callback.normalized_callback_time,
+        )
+        updated_callback = await run_in_threadpool(
+            self.callback_repository.update_callback,
+            callback_document.callback_id,
+            {"metadata": metadata},
         )
         await self.append_event(
             callback_document.callback_id,
@@ -335,20 +447,16 @@ class CallbackSyncService:
                 requested_time_raw=generated_raw,
             )
 
-        if call_document.callback_time is not None:
-            return self.time_service.normalize_existing_datetime(
-                call_document.callback_time,
-                timezone_name=timezone_name,
-                requested_time_raw=requested_time_raw or call_document.callback_time.isoformat(),
-            )
-
         if call_document.status == "meeting_requested" and call_document.meeting_time:
             resolution = self.time_service.resolve_requested_time(
                 call_document.meeting_time,
                 timezone_name=timezone_name,
+                reference_time=call_document.ended_at or call_document.updated_at or call_document.created_at,
             )
+            # For meeting confirmations, if the target time has already passed when AI processes,
+            # run the callback immediately instead of drifting to a later fallback slot.
             now = utc_now()
-            if resolution.normalized_callback_time <= now:
+            if coerce_utc(resolution.normalized_callback_time) <= now:
                 return CallbackTimeResolution(
                     requested_time_raw=resolution.requested_time_raw,
                     normalized_callback_time=now + timedelta(minutes=1),
@@ -359,16 +467,46 @@ class CallbackSyncService:
                 )
             return resolution
 
-        raw_value = requested_time_raw or call_document.notes or "next available slot"
+        if call_document.status == "callback_requested" and requested_time_raw:
+            return self.time_service.resolve_requested_time(
+                requested_time_raw,
+                timezone_name=timezone_name,
+                reference_time=call_document.ended_at or call_document.updated_at or call_document.created_at,
+            )
+
+        if call_document.callback_time is not None:
+            return self.time_service.normalize_existing_datetime(
+                call_document.callback_time,
+                timezone_name=timezone_name,
+                reference_time=call_document.ended_at or call_document.updated_at or call_document.created_at,
+                requested_time_raw=requested_time_raw or call_document.callback_time.isoformat(),
+            )
+
+        raw_value = requested_time_raw or call_document.next_action or call_document.notes or "next available slot"
         return self.time_service.resolve_requested_time(
             raw_value,
             timezone_name=timezone_name,
+            reference_time=call_document.ended_at or call_document.updated_at or call_document.created_at,
         )
 
+    @staticmethod
+    def _has_new_followup_scheduling_signal(previous_call: CallDocument, updated_call: CallDocument) -> bool:
+        if updated_call.callback_id:
+            return True
+        if updated_call.status == "meeting_requested":
+            return bool(updated_call.meeting_time) and updated_call.meeting_time != previous_call.meeting_time
+        if updated_call.status == "callback_requested":
+            return any(
+                [
+                    bool(updated_call.callback_time) and updated_call.callback_time != previous_call.callback_time,
+                    bool(updated_call.next_action) and updated_call.next_action != previous_call.next_action,
+                    bool(updated_call.notes) and updated_call.notes != previous_call.notes,
+                ]
+            )
+        return False
+
     def _extract_timezone(self, call_document: CallDocument) -> str | None:
-        metadata = call_document.metadata or {}
-        callback_context = metadata.get("callback_context") or {}
-        return callback_context.get("timezone") or metadata.get("timezone") or "Asia/Kolkata"
+        return "Asia/Kolkata"
 
     @staticmethod
     def _derive_callback_reason(call_document: CallDocument) -> tuple[CallbackSource, str]:
@@ -389,6 +527,29 @@ class CallbackSyncService:
             return "after 2 hours"
         return "next day"
 
+    def _resolve_stage_from_call(self, call_document: CallDocument) -> str:
+        if call_document.meeting_booked:
+            return "MEETING_BOOKED"
+        if call_document.conversation_stage:
+            return call_document.conversation_stage
+        if call_document.meeting_requested:
+            return "MEETING_PENDING"
+        if call_document.callback_requested:
+            return "INTERESTED" if call_document.product_intro_completed else "PRODUCT_INTRO"
+        return "PRODUCT_INTRO" if call_document.product_intro_completed else "NEW"
+
+    def _build_conversation_state_payload(self, *, call_document: CallDocument, callback_time: datetime) -> dict[str, object]:
+        stage = self._resolve_stage_from_call(call_document)
+        return {
+            "stage": stage,
+            "previous_call_summary": call_document.summary,
+            "callback_requested": True,
+            "callback_time": callback_time.isoformat(),
+            "product_intro_completed": bool(call_document.product_intro_completed),
+            "meeting_booked": bool(call_document.meeting_booked),
+            "next_action": call_document.next_action,
+        }
+
     async def _find_duplicate_callback(
         self,
         *,
@@ -403,7 +564,7 @@ class CallbackSyncService:
             if callback_document.status not in self.open_statuses:
                 continue
             delta = abs(
-                (callback_document.normalized_callback_time - normalized_time).total_seconds()
+                (coerce_utc(callback_document.normalized_callback_time) - coerce_utc(normalized_time)).total_seconds()
             ) / 60
             if delta <= self.duplicate_window_minutes:
                 return callback_document
@@ -432,6 +593,7 @@ class CallbackSyncService:
 
             get_callback_runner_service().kick()
         except Exception:
+            # Avoid blocking sync flow if runner is not initialized yet.
             return
 
     @staticmethod

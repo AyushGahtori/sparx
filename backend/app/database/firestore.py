@@ -77,8 +77,8 @@ class FirestoreService:
 
         try:
             client = self.initialize()
-            documents = client.collection("_sparx_health").limit(1).stream(retry=None, timeout=3)
-            next(documents, None)
+            collections = client.collections()
+            next(collections, None)
             return DependencyHealth(
                 status="connected",
                 message="Firestore connection validated successfully.",

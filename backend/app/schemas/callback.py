@@ -17,8 +17,16 @@ CallbackStatus = Literal[
     "rescheduled",
     "missed",
 ]
-CallbackSource = Literal["individual", "campaign", "webhook", "manual", "action"]
+CallbackSource = Literal["individual", "campaign", "webhook", "manual"]
 CallbackConfidence = Literal["high", "medium", "low"]
+ConversationStage = Literal[
+    "NEW",
+    "PRODUCT_INTRO",
+    "QUALIFICATION",
+    "INTERESTED",
+    "MEETING_PENDING",
+    "MEETING_BOOKED",
+]
 
 
 def _strip_string(value):
@@ -31,9 +39,6 @@ def _strip_string(value):
 class CallbackCreateRequest(BaseModel):
     lead_name: str = Field(min_length=2, max_length=120)
     phone: str = Field(min_length=8, max_length=20)
-    call_id: str | None = Field(default=None, max_length=120)
-    campaign_id: str | None = Field(default=None, max_length=120)
-    contact_id: str | None = Field(default=None, max_length=120)
     callback_reason: str = Field(min_length=3, max_length=300)
     requested_time_raw: str = Field(min_length=2, max_length=200)
     priority: CallbackPriority | None = None
@@ -46,7 +51,6 @@ class CallbackCreateRequest(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     role: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=200)
-    metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -132,6 +136,13 @@ class CallbackResponse(BaseModel):
     last_call_id: str | None = None
     last_call_sid: str | None = None
     notes: str | None = None
+    conversation_stage: ConversationStage = "NEW"
+    product_intro_completed: bool = False
+    previous_call_summary: str | None = None
+    callback_requested: bool = True
+    callback_time: datetime | None = None
+    meeting_booked: bool = False
+    next_action: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
 
 

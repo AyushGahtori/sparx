@@ -44,6 +44,31 @@ class CallIntelligenceRulesService:
         "busy": "Lead was unavailable",
         "not interested": "Not interested at the moment",
     }
+    callback_intent_phrases = {
+        "call me later",
+        "call later",
+        "call you later",
+        "call me back",
+        "call back",
+        "call tomorrow",
+        "call next week",
+        "call after",
+        "callback",
+        "follow up later",
+        "talk later",
+        "speak later",
+        "busy right now",
+        "i am busy",
+        "i'm busy",
+    }
+    hard_no_followup_phrases = {
+        "do not call",
+        "don't call",
+        "stop calling",
+        "not interested",
+        "not required",
+        "no need",
+    }
 
     def build_rule_hints(
         self,
@@ -91,17 +116,26 @@ class CallIntelligenceRulesService:
         transcript_text: str,
         lead_text: str,
     ) -> tuple[str, str]:
+        if call_document.final_status == "not_interested":
+            return "not_interested", "The lead did not pick up after configured retry attempts."
         if call_document.status in {"failed", "busy", "no_answer"}:
             return "failed", "The call did not complete successfully."
         if call_document.meeting_requested:
             return "meeting_requested", "A meeting or demo request was captured."
         if call_document.callback_requested:
             return "callback", "The lead requested a callback."
+        if self._has_callback_intent(lead_text):
+            return "callback", "The lead asked to continue the conversation later or requested a callback."
         if any(keyword in lead_text for keyword in self.cold_keywords):
             return "not_interested", "The lead stated they were not interested or did not need the solution."
         if any(keyword in transcript_text for keyword in self.hot_keywords):
             return "interested", "The lead asked commercially meaningful questions."
         return "successful", "The conversation completed with usable engagement."
+
+    def _has_callback_intent(self, lead_text: str) -> bool:
+        if any(phrase in lead_text for phrase in self.hard_no_followup_phrases):
+            return False
+        return any(phrase in lead_text for phrase in self.callback_intent_phrases)
 
     @staticmethod
     def _infer_next_action(call_document: CallDocument, lead_type: str, call_outcome: str) -> str:

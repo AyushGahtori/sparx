@@ -139,12 +139,27 @@ class GemmaService:
         )
 
     async def _generate_content(self, request_body: dict[str, object]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.settings.gemma_request_timeout_seconds) as client:
-            response = await client.post(
-                f"{self.base_url}/models/{self._normalized_model_name}:generateContent",
-                headers=self._build_headers(),
-                json=request_body,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.gemma_request_timeout_seconds) as client:
+                response = await client.post(
+                    f"{self.base_url}/models/{self._normalized_model_name}:generateContent",
+                    headers=self._build_headers(),
+                    json=request_body,
+                )
+        except httpx.TimeoutException as exc:
+            raise AppError(
+                status_code=504,
+                code="gemma_request_timeout",
+                message="Gemma request timed out while generating post-call intelligence.",
+                details={"error": str(exc)},
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AppError(
+                status_code=502,
+                code="gemma_request_network_error",
+                message="Gemma request failed due to a network error.",
+                details={"error": str(exc)},
+            ) from exc
 
         if not response.is_success:
             raise AppError(

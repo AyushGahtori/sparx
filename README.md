@@ -40,7 +40,10 @@ python -m venv .venv
 pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
+
+```powershell
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
 
 ### 2. Frontend
@@ -50,11 +53,17 @@ cd frontend
 python -m http.server 5500
 ```
 
+Update `frontend/runtime-config.js` before production deployment so the static UI knows:
+- the real API base URL
+- whether Firebase auth is enabled and required
+- the Firebase web config for operator sign-in
+
 ### 3. Optional dev test dependencies
 
 ```powershell
 cd backend
-.venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 ```
 
@@ -99,10 +108,14 @@ pip install -r requirements-dev.txt
 - `API_V1_PREFIX`
 - `LOG_LEVEL`
 - `ENABLE_FILE_LOGGING`
+- `EXPOSE_API_DOCS`
 - `PUBLIC_BASE_URL`
+- `TRUST_PROXY_HEADERS`
 - `CORS_ORIGINS`
 
 ### Security and resilience
+- `AUTH_REQUIRED`
+- `AUTH_REQUIRE_VERIFIED_EMAIL`
 - `RATE_LIMIT_ENABLED`
 - `GENERAL_RATE_LIMIT_PER_MINUTE`
 - `CALL_RATE_LIMIT_PER_MINUTE`
@@ -133,6 +146,13 @@ pip install -r requirements-dev.txt
 - `GEMMA_MAX_RETRIES`
 - `AI_MAX_PARALLEL_JOBS`
 - `AI_DISPATCH_INTERVAL_SECONDS`
+- `RUN_BACKGROUND_RUNNERS`
+- `RUN_AI_BACKGROUND_RUNNER`
+- `RUN_CALL_DISPATCH_RUNNERS`
+- `RUN_CALLBACK_DISPATCH_RUNNER`
+- `RUN_CAMPAIGN_DISPATCH_RUNNER`
+
+For local development, use `RUN_AI_BACKGROUND_RUNNER=true`, `RUN_CALLBACK_DISPATCH_RUNNER=true`, and `RUN_CAMPAIGN_DISPATCH_RUNNER=false` when you want AI summaries and scheduled callbacks to run while preventing scheduled campaigns from auto-dispatching. Manual actions such as starting a call, starting a campaign, or executing a callback still work.
 
 ### Integrations
 - `FIREBASE_CREDENTIALS_PATH`
@@ -145,6 +165,15 @@ pip install -r requirements-dev.txt
 - `TWILIO_PHONE_NUMBER`
 - `DEEPGRAM_API_KEY`
 - `DEEPGRAM_PROJECT_ID`
+
+### Google Calendar and meeting workflow
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`
+- `GOOGLE_OAUTH_STATE_SECRET`
+- `GOOGLE_OAUTH_TOKEN_DIR`
+- `GOOGLE_OAUTH_DEFAULT_USER_FILE`
+- `FRONTEND_SETTINGS_URL`
 
 ## Local startup
 
@@ -163,6 +192,13 @@ cd backend
 .\start_backend.ps1
 ```
 
+Or on Windows systems where PowerShell script execution is blocked:
+
+```powershell
+cd backend
+.\start_backend.cmd
+```
+
 ### Frontend
 
 ```powershell
@@ -175,6 +211,13 @@ Or:
 ```powershell
 cd frontend
 .\start_frontend.ps1
+```
+
+Or on Windows systems where PowerShell script execution is blocked:
+
+```powershell
+cd frontend
+.\start_frontend.cmd
 ```
 
 ## ngrok for Twilio webhooks
@@ -192,6 +235,15 @@ PUBLIC_BASE_URL=https://your-ngrok-url
 ```
 
 Keep ngrok running while you test live calls or webhooks.
+
+## Auth and meeting flow
+
+1. Operators sign in to the frontend through Firebase Authentication.
+2. The frontend sends the Firebase ID token as a bearer token to the backend.
+3. The backend verifies that token with Firebase Admin before allowing protected API access.
+4. From Diagnostics, an authenticated operator connects Google Calendar.
+5. That Google OAuth connection becomes the default calendar owner for meeting creation and background invite automation until another authenticated operator reconnects it.
+6. Meeting sync, reschedule, delete, and automatic invite creation use the stored Google Calendar authorization and reflect back into Google Calendar.
 
 ## Main frontend pages
 
@@ -304,6 +356,12 @@ Included backend tests cover:
 - Confirm backend is running on `127.0.0.1:8000`.
 - Confirm frontend is served from `127.0.0.1:5500`.
 - Confirm browser console does not show blocked CORS origins.
+
+### Firebase login shows `auth/configuration-not-found`
+- Open Firebase Console -> Authentication -> Sign-in method.
+- Enable the `Google` provider and save it.
+- In Firebase Console -> Authentication -> Settings -> Authorized domains, make sure both `localhost` and `127.0.0.1` are listed for local development.
+- Confirm the web app config in `frontend/runtime-config.js` belongs to the same Firebase project where Google sign-in was enabled.
 
 ### Virtualenv `python.exe` fails on Windows
 - Some Windows Store Python installations leave the venv launcher in a broken logon-session state.

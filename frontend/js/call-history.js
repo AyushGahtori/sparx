@@ -2,7 +2,7 @@ import { bootPage } from "./app.js";
 import { frontendConfig, pageTitles } from "./config.js";
 import { confirmDialog, showContentDialog } from "./components/modal.js";
 import { renderTableEmpty, renderTableError, renderTableLoading } from "./components/table.js";
-import { callService } from "./services/callService.js?v=operator-complete";
+import { callService } from "./services/callService.js";
 import { campaignService } from "./services/campaignService.js";
 import { navigateTo } from "./router.js";
 import {
@@ -11,6 +11,8 @@ import {
   formatDuration,
   formatScore,
   formatStatusLabel,
+  indiaDateInputToIso,
+  parseAppDate,
 } from "./utils/formatter.js";
 import { showError, showInfo, showSuccess } from "./utils/notifications.js";
 
@@ -23,8 +25,6 @@ const campaignFilter = document.getElementById("call-campaign-filter");
 
 let allCalls = [];
 let campaignMap = new Map();
-let isCallsRefreshing = false;
-const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "answered", "in_progress"];
 
 function getFilterValue(fieldName) {
   const field = filtersForm.elements.namedItem(fieldName);
@@ -47,6 +47,22 @@ function getCampaignName(campaignId) {
     return "Manual";
   }
   return campaignMap.get(campaignId) || campaignId;
+}
+
+function formatMeetingTimeCardValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") {
+    return "-";
+  }
+
+  const match = raw.match(/^(.+?\s(?:AM|PM))\s+(.+)$/i);
+  if (!match) {
+    return escapeHtml(raw);
+  }
+
+  const timePart = escapeHtml(match[1]);
+  const datePart = escapeHtml(match[2]);
+  return `${timePart}<br><span class="meeting-time-date">${datePart}</span>`;
 }
 
 function buildDetailTranscript(transcript) {
@@ -78,21 +94,27 @@ function openCallDetail(call) {
   showContentDialog({
     title: `${call.lead_name} call details`,
     bodyHtml: `
-      <div class="card-grid">
+      <div class="card-grid call-detail-cards">
         <div class="stat-card"><span class="stat-label">Status</span><span class="stat-value">${escapeHtml(formatStatusLabel(call.status))}</span></div>
         <div class="stat-card"><span class="stat-label">Duration</span><span class="stat-value">${escapeHtml(formatDuration(call.duration))}</span></div>
         <div class="stat-card"><span class="stat-label">Lead Type</span><span class="stat-value">${escapeHtml(call.lead_type || "-")}</span></div>
         <div class="stat-card"><span class="stat-label">AI Score</span><span class="stat-value">${formatScore(call.ai_score)}</span></div>
+        <div class="stat-card"><span class="stat-label">Meeting Time</span><span class="stat-value">${formatMeetingTimeCardValue(call.meeting_time || "-")}</span></div>
       </div>
       <div class="detail-list" style="margin-top: 1rem;">
         <div class="detail-row"><span class="detail-label">Phone</span><span>${escapeHtml(call.phone)}</span></div>
+        <div class="detail-row"><span class="detail-label">Email ID</span><span>${escapeHtml(call.email || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Call Type</span><span>${escapeHtml(call.call_type)}</span></div>
         <div class="detail-row"><span class="detail-label">Campaign</span><span>${escapeHtml(getCampaignName(call.campaign_id))}</span></div>
         <div class="detail-row"><span class="detail-label">Agent</span><span>${escapeHtml(call.agent_name)}</span></div>
         <div class="detail-row"><span class="detail-label">Objective</span><span>${escapeHtml(call.call_objective)}</span></div>
         <div class="detail-row"><span class="detail-label">Summary</span><span>${escapeHtml(call.summary || "No AI summary available yet.")}</span></div>
+        <div class="detail-row"><span class="detail-label">Meeting Time</span><span>${escapeHtml(call.meeting_time || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Next Action</span><span>${escapeHtml(call.next_action || "-")}</span></div>
         <div class="detail-row"><span class="detail-label">Outcome</span><span>${escapeHtml(call.call_outcome || "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Retry Count</span><span>${escapeHtml(String(call.retry_count ?? 0))}</span></div>
+        <div class="detail-row"><span class="detail-label">Next Auto Call</span><span>${escapeHtml(call.next_retry_time ? formatDateTime(call.next_retry_time) : "-")}</span></div>
+        <div class="detail-row"><span class="detail-label">Final Status</span><span>${escapeHtml(formatStatusLabel(call.final_status || "-"))}</span></div>
         <div class="detail-row"><span class="detail-label">Notes</span><span>${escapeHtml(call.notes || "No notes stored.")}</span></div>
       </div>
       <h3 style="margin-top: 1.25rem;">Transcript Preview</h3>
@@ -109,8 +131,8 @@ function applyFilters(calls) {
   const campaignId = getFilterValue("campaign_id");
   const dateFromValue = getFilterValue("date_from");
   const dateToValue = getFilterValue("date_to");
-  const dateFrom = dateFromValue ? new Date(`${dateFromValue}T00:00:00`) : null;
-  const dateTo = dateToValue ? new Date(`${dateToValue}T23:59:59`) : null;
+  const dateFrom = dateFromValue ? new Date(indiaDateInputToIso(dateFromValue, false)) : null;
+  const dateTo = dateToValue ? new Date(indiaDateInputToIso(dateToValue, true)) : null;
 
   return calls.filter((call) => {
     if (status && call.status !== status) {
@@ -123,7 +145,7 @@ function applyFilters(calls) {
       return false;
     }
 
-    const callDate = new Date(call.ended_at || call.created_at || 0);
+    const callDate = parseAppDate(call.ended_at || call.created_at || 0);
     if (dateFrom && callDate < dateFrom) {
       return false;
     }
@@ -138,6 +160,7 @@ function applyFilters(calls) {
     const haystack = [
       call.lead_name,
       call.phone,
+      call.email,
       call.company,
       call.city,
       call.status,
@@ -158,14 +181,6 @@ function renderRows(calls) {
 
   tableBody.innerHTML = calls
     .map((call) => {
-      const canDelete =
-        call.call_type === "individual" &&
-        !call.campaign_id &&
-        !call.contact_id &&
-        !call.callback_id &&
-        !ACTIVE_CALL_STATUSES.includes(call.status);
-      const canMarkCompleted = call.call_type === "individual" && ACTIVE_CALL_STATUSES.includes(call.status);
-
       return `
         <tr>
           <td>
@@ -185,16 +200,7 @@ function renderRows(calls) {
             <div class="table-actions">
               <button class="button secondary small" type="button" data-action="view" data-call-id="${call.call_id}">View Summary</button>
               <button class="button ghost small" type="button" data-action="retry" data-call-id="${call.call_id}">Retry Call</button>
-              ${
-                canMarkCompleted
-                  ? `<button class="button ghost small" type="button" data-action="complete" data-call-id="${call.call_id}">Mark Completed</button>`
-                  : ""
-              }
-              ${
-                canDelete
-                  ? `<button class="button ghost small danger-outline" type="button" data-action="delete" data-call-id="${call.call_id}">Delete</button>`
-                  : ""
-              }
+              <button class="button ghost small danger-outline" type="button" data-action="delete" data-call-id="${call.call_id}">Delete</button>
             </div>
           </td>
         </tr>
@@ -219,27 +225,15 @@ async function loadCampaignMap() {
   }
 }
 
-async function loadCalls({ showLoading = true } = {}) {
-  if (isCallsRefreshing) {
-    return;
-  }
-  isCallsRefreshing = true;
-
-  if (showLoading) {
-    renderTableLoading(tableBody, 9, "Loading calls...");
-  }
+async function loadCalls() {
+  renderTableLoading(tableBody, 9, "Loading calls...");
 
   try {
     allCalls = await callService.listCalls();
     renderRows(applyFilters(allCalls));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load call history.";
-    if (showLoading) {
-      renderTableError(tableBody, 9, message);
-    }
-    showError(message);
-  } finally {
-    isCallsRefreshing = false;
+    renderTableError(tableBody, 9, message);
   }
 }
 
@@ -259,6 +253,7 @@ async function handleAction(action, callId) {
       navigateTo("manual-call", {
         lead_name: call.lead_name,
         phone: call.phone,
+        email: call.email || "",
         company: call.company || "",
         city: call.city || "",
         role: call.role || "",
@@ -285,25 +280,7 @@ async function handleAction(action, callId) {
       await callService.deleteCall(callId);
       renderMessage("success", "Call record deleted successfully.");
       showSuccess("Call record deleted.");
-      await loadCalls({ showLoading: false });
-    }
-
-    if (action === "complete") {
-      const confirmed = await confirmDialog({
-        title: "Mark call completed",
-        message: "Mark this stuck manual call as completed so the number can be called again immediately?",
-        confirmLabel: "Mark completed",
-      });
-      if (!confirmed) {
-        return;
-      }
-      await callService.updateCallStatus(callId, {
-        status: "completed",
-        notes: "Manually marked completed by operator.",
-      });
-      renderMessage("success", "Call marked completed successfully.");
-      showSuccess("Call marked completed.");
-      await loadCalls({ showLoading: false });
+      await loadCalls();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to complete the call history action.";
@@ -323,7 +300,7 @@ clearFiltersButton.addEventListener("click", () => {
 });
 
 refreshButton.addEventListener("click", async () => {
-  await loadCalls({ showLoading: true });
+  await loadCalls();
   showSuccess("Call history refreshed.");
 });
 
@@ -342,5 +319,5 @@ bootPage({
 });
 
 loadCampaignMap();
-loadCalls({ showLoading: true });
-window.setInterval(() => loadCalls({ showLoading: false }), frontendConfig.refreshIntervals.callHistoryMs);
+loadCalls();
+window.setInterval(loadCalls, frontendConfig.refreshIntervals.callHistoryMs);

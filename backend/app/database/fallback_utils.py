@@ -12,7 +12,20 @@ def is_firestore_quota_error(exc: Exception) -> bool:
     return any(marker in text for marker in markers)
 
 
-def should_use_mongo_fallback(exc: Exception) -> bool:
+def is_firestore_disabled_error(exc: Exception) -> bool:
     if isinstance(exc, AppError) and exc.code == "firestore_not_configured":
         return True
-    return is_firestore_quota_error(exc)
+    text = str(exc).lower()
+    markers = (
+        "service_disabled",
+        "permissiondenied",
+        "permission denied",
+        "firestore api has not been used",
+        "cloud firestore api has not been used",
+        "firestore.googleapis.com",
+    )
+    return any(marker in text for marker in markers)
+
+
+def should_use_mongo_fallback(exc: Exception) -> bool:
+    return is_firestore_disabled_error(exc) or is_firestore_quota_error(exc)

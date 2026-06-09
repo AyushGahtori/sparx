@@ -10,6 +10,12 @@ export function initialiseNavigation() {
     activeKey = "campaigns";
   } else if (path.includes("callbacks")) {
     activeKey = "callbacks";
+  } else if (path.includes("meeting-details")) {
+    activeKey = "meeting-details";
+  } else if (path.includes("call-history")) {
+    activeKey = "call-history";
+  } else if (path.includes("call-recordings")) {
+    activeKey = "call-recordings";
   } else if (path.includes("summaries")) {
     activeKey = "summaries";
   }

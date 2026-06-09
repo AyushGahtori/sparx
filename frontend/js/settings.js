@@ -1,9 +1,11 @@
 import { bootPage } from "./app.js";
-import { pageTitles } from "./config.js";
+import { frontendConfig, pageTitles } from "./config.js";
 import { apiService } from "./services/api.js";
 import { escapeHtml } from "./utils/formatter.js";
+import { showError, showSuccess } from "./utils/notifications.js";
 
 const healthRoot = document.getElementById("settings-health");
+const googleOAuthRoot = document.getElementById("google-oauth-panel");
 
 function renderHealth(health) {
   const queueRows = Object.entries(health.queues || {})
@@ -45,6 +47,98 @@ async function loadHealth() {
   }
 }
 
+function renderGoogleOAuthStatus(status) {
+  const configured = Boolean(status.configured);
+  const connected = Boolean(status.connected);
+  const pillClass = connected ? "connected" : configured ? "pending" : "not_configured";
+  const pillText = connected ? "Connected" : configured ? "Ready to connect" : "Not configured";
+  const scopes = Array.isArray(status.scopes) ? status.scopes : [];
+  const defaultOwnerEmail = status.default_calendar_owner?.email || status.default_calendar_owner?.uid || "-";
+
+  googleOAuthRoot.innerHTML = `
+    <div class="detail-list">
+      <div class="detail-row">
+        <span class="detail-label">Status</span>
+        <span class="status-pill ${pillClass}">${escapeHtml(pillText)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Redirect URI</span>
+        <span>${escapeHtml(status.redirect_uri || "-")}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Scopes</span>
+        <span>${escapeHtml(scopes.join(", ") || "-")}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Calendar Owner</span>
+        <span>${escapeHtml(defaultOwnerEmail)}</span>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button id="google-connect-button" class="button primary" type="button" ${configured ? "" : "disabled"}>${connected ? "Reconnect Google" : "Connect Google"}</button>
+      <button id="google-disconnect-button" class="button secondary" type="button" ${connected ? "" : "disabled"}>Disconnect</button>
+    </div>
+  `;
+
+  document.getElementById("google-connect-button")?.addEventListener("click", connectGoogleOAuth);
+  document.getElementById("google-disconnect-button")?.addEventListener("click", disconnectGoogleOAuth);
+}
+
+async function loadGoogleOAuthStatus() {
+  try {
+    const status = await apiService.get("/auth/google/status");
+    renderGoogleOAuthStatus(status);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load Google OAuth status.";
+    googleOAuthRoot.innerHTML = `<div class="alert error">${escapeHtml(message)}</div>`;
+  }
+}
+
+async function connectGoogleOAuth() {
+  try {
+    const result = await apiService.get("/auth/google/login");
+    if (!result.authorization_url) {
+      throw new Error("Google authorization URL was not returned.");
+    }
+    window.location.href = result.authorization_url;
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Unable to start Google OAuth.");
+  }
+}
+
+async function disconnectGoogleOAuth() {
+  try {
+    await apiService.delete("/auth/google/disconnect");
+    showSuccess("Google Calendar disconnected.");
+    await loadGoogleOAuthStatus();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Unable to disconnect Google Calendar.");
+  }
+}
+
+function handleGoogleOAuthRedirectMessage() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("google_oauth");
+  if (!status) {
+    return;
+  }
+  if (status === "connected") {
+    showSuccess("Google Calendar connected.");
+  } else if (status === "error") {
+    showError("Google OAuth failed. Please try connecting again.");
+  }
+  params.delete("google_oauth");
+  const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+  window.history.replaceState({}, "", cleanUrl);
+}
+
+function bindOperatorLinks() {
+  const docsLink = document.getElementById("api-docs-link");
+  if (docsLink instanceof HTMLAnchorElement) {
+    docsLink.href = frontendConfig.docsUrl || frontendConfig.apiBaseUrl;
+  }
+}
+
 bootPage({
   pageKey: "settings",
   title: pageTitles.settings,
@@ -52,4 +146,7 @@ bootPage({
 });
 
 loadHealth();
+handleGoogleOAuthRedirectMessage();
+bindOperatorLinks();
+loadGoogleOAuthStatus();
 window.setInterval(loadHealth, 20000);

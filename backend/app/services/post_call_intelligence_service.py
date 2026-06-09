@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
 
@@ -21,8 +22,18 @@ from app.services.call_intelligence_rules_service import (
 )
 from app.services.callback_sync_service import CallbackSyncService, get_callback_sync_service
 from app.services.gemma_service import GemmaService, get_gemma_service
+from app.services.google_calendar_service import GoogleCalendarService, get_google_calendar_service
+from app.services.meeting_email_service import MeetingEmailService, get_meeting_email_service
+from app.services.meeting_invite_guard import meeting_invite_lock
 from app.services.transcript_service import TranscriptService, get_transcript_service
-from app.utils.time import utc_now
+from app.utils.lead_email import (
+    apply_lead_email_override,
+    normalize_email,
+    resolve_lead_email,
+    resolve_text_email_override,
+    resolve_transcript_email_override,
+)
+from app.utils.time import coerce_utc, utc_now, utc_now_iso
 
 
 class PostCallIntelligenceService:
@@ -37,12 +48,16 @@ class PostCallIntelligenceService:
         rules_service: CallIntelligenceRulesService,
         gemma_service: GemmaService,
         callback_sync_service: CallbackSyncService,
+        google_calendar_service: GoogleCalendarService,
+        meeting_email_service: MeetingEmailService,
     ) -> None:
         self.call_repository = call_repository
         self.transcript_service = transcript_service
         self.rules_service = rules_service
         self.gemma_service = gemma_service
         self.callback_sync_service = callback_sync_service
+        self.google_calendar_service = google_calendar_service
+        self.meeting_email_service = meeting_email_service
 
     async def ingest_transcript(
         self,
@@ -137,6 +152,11 @@ class PostCallIntelligenceService:
             if final_lead_type == "cold":
                 final_lead_type = "warm"
                 final_lead_reason = "The lead requested a callback, which indicates some follow-up interest."
+        elif rule_hints["call_outcome"] == "callback" and intelligence_result.call_outcome in {"successful", "interested"}:
+            final_call_outcome = "callback"
+            final_lead_type = "warm" if final_lead_type == "cold" else final_lead_type
+            final_outcome_reason = str(rule_hints["outcome_reason"])
+            final_lead_reason = str(rule_hints["lead_reason"])
         elif rule_hints["call_outcome"] == "not_interested" and intelligence_result.call_outcome in {"successful", "interested"}:
             final_call_outcome = "not_interested"
             final_outcome_reason = str(rule_hints["outcome_reason"])
@@ -154,7 +174,33 @@ class PostCallIntelligenceService:
             final_meeting_time_raw,
             reference_time=call_document.ended_at or call_document.created_at,
         )
+        resolved_callback_time = None
+        if final_meeting_time_raw:
+            try:
+                resolved_callback_time = self.callback_sync_service.time_service.resolve_requested_time(
+                    final_meeting_time_raw,
+                    timezone_name="Asia/Kolkata",
+                    reference_time=call_document.ended_at or call_document.created_at,
+                )
+            except Exception:
+                resolved_callback_time = None
+        if final_meeting_time is None and resolved_callback_time is not None:
+            final_meeting_time = self._format_india_time(resolved_callback_time.normalized_callback_time)
         final_ai_score = round((intelligence_result.ai_score * 0.7) + (transcript_metrics["transcript_clarity_score"] * 0.3))
+        current_email = resolve_lead_email(direct_email=call_document.email, metadata=call_document.metadata)
+        email_override = resolve_transcript_email_override(
+            transcript_entries=transcript_entries,
+            existing_email=current_email,
+        ) or resolve_text_email_override(
+            texts=[
+                final_summary,
+                intelligence_result.summary,
+                intelligence_result.next_action,
+                final_short_notes,
+                final_outcome_reason,
+            ],
+            existing_email=current_email,
+        )
 
         update_payload = {
             "summary": final_summary,
@@ -167,6 +213,7 @@ class PostCallIntelligenceService:
             "next_action": intelligence_result.next_action,
             "short_notes": final_short_notes,
             "meeting_time": final_meeting_time,
+            "callback_time": resolved_callback_time.normalized_callback_time if resolved_callback_time else None,
             "call_outcome": final_call_outcome,
             "outcome_reason": final_outcome_reason,
             "ai_score": min(max(final_ai_score, 0), 100),
@@ -180,6 +227,14 @@ class PostCallIntelligenceService:
                 "transcript_metrics": transcript_metrics,
             },
         }
+        if email_override:
+            update_payload["email"] = email_override
+            update_payload["metadata"] = apply_lead_email_override(
+                metadata=deepcopy(call_document.metadata),
+                new_email=email_override,
+                old_email=call_document.email,
+                source="post_call_ai",
+            )
 
         should_schedule_followup = False
         followup_requested_time_raw: str | None = None
@@ -188,8 +243,6 @@ class PostCallIntelligenceService:
             update_payload["meeting_requested"] = True
             if call_document.status == "completed":
                 update_payload["status"] = "meeting_requested"
-            should_schedule_followup = bool(final_meeting_time)
-            followup_requested_time_raw = final_meeting_time
         elif final_call_outcome == "callback":
             update_payload["callback_requested"] = True
             if call_document.status == "completed":
@@ -197,7 +250,9 @@ class PostCallIntelligenceService:
             followup_requested_time_raw = final_meeting_time or intelligence_result.next_action
             should_schedule_followup = True
 
-        if final_meeting_time and not should_schedule_followup:
+        # If we have a concrete meeting/callback time from AI analysis, always schedule follow-up.
+        # This avoids missing auto-calls when model classification is noisy.
+        if final_meeting_time and not should_schedule_followup and final_call_outcome != "meeting_requested":
             update_payload["callback_requested"] = True
             if call_document.status == "completed":
                 update_payload["status"] = "callback_requested"
@@ -216,6 +271,8 @@ class PostCallIntelligenceService:
                 requested_time_raw=followup_requested_time_raw,
                 source="post_call_ai",
             )
+        if final_call_outcome == "meeting_requested" and final_meeting_time:
+            updated_call = await self._send_meeting_invite_once(updated_call)
         return self._to_summary_detail(updated_call)
 
     async def list_summaries(
@@ -252,6 +309,13 @@ class PostCallIntelligenceService:
     async def get_summary(self, call_id: str) -> SummaryDetailResponse:
         call_document = await run_in_threadpool(self.call_repository.get_call, call_id)
         return self._to_summary_detail(call_document)
+
+    async def ensure_meeting_invite(self, call_id: str) -> bool:
+        call_document = await run_in_threadpool(self.call_repository.get_call, call_id)
+        if not self._needs_meeting_invite(call_document):
+            return False
+        await self._send_meeting_invite_once(call_document)
+        return True
 
     async def delete_summary(self, call_id: str) -> SummaryDeleteResponse:
         call_document = await run_in_threadpool(self.call_repository.get_call, call_id)
@@ -293,6 +357,35 @@ class PostCallIntelligenceService:
             call_document.status in cls.final_call_statuses
             and bool(call_document.transcript)
         )
+
+    @staticmethod
+    def _needs_meeting_invite(call_document: CallDocument) -> bool:
+        if not (call_document.status == "meeting_requested" or call_document.call_outcome == "meeting_requested" or call_document.meeting_requested):
+            return False
+        resolved_email = resolve_lead_email(direct_email=call_document.email, metadata=call_document.metadata)
+        resolved_email = resolve_text_email_override(
+            texts=[
+                call_document.summary,
+                call_document.next_action,
+                call_document.short_notes,
+                call_document.outcome_reason,
+                call_document.previous_call_summary,
+                call_document.notes,
+            ],
+            existing_email=resolved_email,
+        ) or resolved_email
+        if not resolved_email or not call_document.meeting_time:
+            return False
+        meeting_invite = call_document.metadata.get("meeting_invite")
+        if not isinstance(meeting_invite, dict):
+            return True
+        email_result = meeting_invite.get("email")
+        if not isinstance(email_result, dict):
+            return True
+        recipient = normalize_email(email_result.get("recipient"))
+        if recipient and recipient != normalize_email(resolved_email):
+            return True
+        return email_result.get("status") not in {"sent", "failed"}
 
     @staticmethod
     def _call_date(call_document: CallDocument) -> datetime | None:
@@ -346,12 +439,170 @@ class PostCallIntelligenceService:
             ai_score=60,
         )
 
+    @staticmethod
+    def _format_india_time(utc_dt: datetime) -> str:
+        india_dt = coerce_utc(utc_dt).astimezone(ZoneInfo("Asia/Kolkata"))
+        hour_24 = india_dt.hour
+        minute = india_dt.minute
+        meridiem = "AM" if hour_24 < 12 else "PM"
+        hour_12 = hour_24 % 12 or 12
+        minute_part = f":{minute:02d}" if minute else ""
+        date_part = india_dt.strftime("%d-%B-%Y").lower()
+        return f"{hour_12}{minute_part} {meridiem} {date_part}"
+
+    async def _send_meeting_invite_once(self, call_document: CallDocument) -> CallDocument:
+        async with meeting_invite_lock(call_document.call_id):
+            fresh_call = await run_in_threadpool(self.call_repository.get_call, call_document.call_id)
+            fresh_call = await self._apply_transcript_email_override_if_needed(fresh_call, source="meeting_invite")
+            if self._has_sent_meeting_invite_for_current_email(fresh_call):
+                return fresh_call
+            return await self._send_meeting_invite_unlocked(fresh_call)
+
+    async def _send_meeting_invite_unlocked(self, call_document: CallDocument) -> CallDocument:
+        metadata = deepcopy(call_document.metadata)
+        existing_invite = metadata.get("meeting_invite")
+        if isinstance(existing_invite, dict):
+            existing_email = existing_invite.get("email") if isinstance(existing_invite.get("email"), dict) else {}
+            existing_recipient = normalize_email(existing_email.get("recipient"))
+            current_email = normalize_email(call_document.email)
+            if existing_email.get("status") == "sent" and existing_recipient == current_email:
+                return call_document
+            meeting_payload = self._meeting_payload_for_recipient(existing_invite, call_document.email)
+            calendar_result = existing_invite.get("calendar") or {
+                "status": "sent" if existing_invite.get("event_id") else "not_created",
+                "provider": existing_invite.get("provider") or "google",
+                "event_id": existing_invite.get("event_id"),
+                "event_link": existing_invite.get("event_link"),
+                "meet_link": existing_invite.get("meet_link"),
+            }
+        else:
+            try:
+                meeting_payload = await run_in_threadpool(
+                    self.google_calendar_service.create_meeting_invite,
+                    call_document,
+                )
+                calendar_result = {
+                    "status": "sent",
+                    "provider": "google",
+                    "event_id": meeting_payload.get("event_id"),
+                    "event_link": meeting_payload.get("event_link"),
+                    "meet_link": meeting_payload.get("meet_link"),
+                }
+            except AppError as exc:
+                meeting_payload = await run_in_threadpool(
+                    self.google_calendar_service.build_meeting_details,
+                    call_document,
+                )
+                calendar_result = {
+                    "status": "failed",
+                    "error_code": exc.code,
+                    "error_message": exc.message,
+                    "provider": "google",
+                }
+
+        try:
+            email_result = await run_in_threadpool(
+                self.meeting_email_service.send_meeting_email,
+                meeting=meeting_payload,
+                attendee_email=call_document.email,
+            )
+        except AppError as exc:
+            email_result = {
+                "status": "failed",
+                "error_code": exc.code,
+                "error_message": exc.message,
+                "recipient": call_document.email,
+            }
+        except Exception as exc:
+            email_result = {
+                "status": "failed",
+                "error_code": "mail_send_failed",
+                "error_message": str(exc),
+                "recipient": call_document.email,
+            }
+        metadata["meeting_invite"] = {
+            **meeting_payload,
+            "calendar": calendar_result,
+            "email": email_result,
+            "status": "sent" if email_result.get("status") == "sent" else "failed",
+            "sent_at": utc_now_iso() if email_result.get("status") == "sent" else None,
+            "failed_at": utc_now_iso() if email_result.get("status") != "sent" else None,
+            "source": "post_call_ai",
+        }
+        updates = {
+            "metadata": metadata,
+            "meeting_booked": email_result.get("status") == "sent",
+            "conversation_stage": "MEETING_BOOKED" if email_result.get("status") == "sent" else call_document.conversation_stage,
+        }
+
+        return await run_in_threadpool(
+            self.call_repository.update_call,
+            call_document.call_id,
+            updates,
+        )
+
+    @staticmethod
+    def _has_sent_meeting_invite_for_current_email(call_document: CallDocument) -> bool:
+        existing_invite = call_document.metadata.get("meeting_invite")
+        if not isinstance(existing_invite, dict):
+            return False
+        email_result = existing_invite.get("email")
+        if not isinstance(email_result, dict):
+            return False
+        return (
+            email_result.get("status") == "sent"
+            and normalize_email(email_result.get("recipient")) == normalize_email(call_document.email)
+        )
+
+    async def _apply_transcript_email_override_if_needed(self, call_document: CallDocument, *, source: str) -> CallDocument:
+        current_email = resolve_lead_email(direct_email=call_document.email, metadata=call_document.metadata)
+        email_override = resolve_transcript_email_override(
+            transcript_entries=call_document.transcript,
+            existing_email=current_email,
+        ) or resolve_text_email_override(
+            texts=[
+                call_document.summary,
+                call_document.next_action,
+                call_document.short_notes,
+                call_document.outcome_reason,
+                call_document.previous_call_summary,
+                call_document.notes,
+            ],
+            existing_email=current_email,
+        )
+        if not email_override or email_override == call_document.email:
+            return call_document
+
+        metadata = apply_lead_email_override(
+            metadata=deepcopy(call_document.metadata),
+            new_email=email_override,
+            old_email=call_document.email,
+            source=source,
+        )
+        return await run_in_threadpool(
+            self.call_repository.update_call,
+            call_document.call_id,
+            {
+                "email": email_override,
+                "metadata": metadata,
+            },
+        )
+
+    @staticmethod
+    def _meeting_payload_for_recipient(meeting_payload: dict[str, object], attendee_email: str | None) -> dict[str, object]:
+        payload = deepcopy(meeting_payload)
+        if attendee_email:
+            payload["attendee_email"] = attendee_email
+            payload["attendees"] = [attendee_email]
+        return payload
+
     @classmethod
     def _to_summary_list_item(cls, call_document: CallDocument) -> SummaryListItemResponse:
         return SummaryListItemResponse(
             call_id=call_document.call_id,
             lead_name=call_document.lead_name,
             phone=call_document.phone,
+            email=call_document.email,
             call_date=cls._call_date(call_document),
             campaign_id=call_document.campaign_id,
             final_status=call_document.final_status,
@@ -415,4 +666,6 @@ def get_post_call_intelligence_service() -> PostCallIntelligenceService:
         rules_service=get_call_intelligence_rules_service(),
         gemma_service=get_gemma_service(),
         callback_sync_service=get_callback_sync_service(),
+        google_calendar_service=get_google_calendar_service(),
+        meeting_email_service=get_meeting_email_service(),
     )

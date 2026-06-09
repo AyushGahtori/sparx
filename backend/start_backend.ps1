@@ -11,4 +11,11 @@ if (-not (Test-Path ".venv\Scripts\Activate.ps1")) {
 }
 
 . ".\.venv\Scripts\Activate.ps1"
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+$appPort = "8000"
+if (Test-Path ".env") {
+  $configuredPort = Get-Content ".env" | Where-Object { $_ -match "^APP_PORT=" } | Select-Object -First 1
+  if ($configuredPort) {
+    $appPort = ($configuredPort -replace "^APP_PORT=", "").Trim()
+  }
+}
+uvicorn app.main:app --host 127.0.0.1 --port $appPort

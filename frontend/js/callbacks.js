@@ -29,7 +29,6 @@ const refreshCallbacksButton = document.getElementById("refresh-callbacks-button
 const clearFiltersButton = document.getElementById("clear-filters-button");
 
 let allCallbacks = [];
-let isCallbacksRefreshing = false;
 
 function getFilterValue(fieldName) {
   const field = callbackFiltersForm.elements.namedItem(fieldName);
@@ -165,15 +164,8 @@ function collectCallbackPayload() {
   return payload;
 }
 
-async function loadCallbacks({ showLoading = true } = {}) {
-  if (isCallbacksRefreshing) {
-    return;
-  }
-  isCallbacksRefreshing = true;
-
-  if (showLoading) {
-    renderTableLoading(callbackTableBody, 8, "Loading callbacks...");
-  }
+async function loadCallbacks() {
+  renderTableLoading(callbackTableBody, 8, "Loading callbacks...");
 
   try {
     allCallbacks = await callbackService.listCallbacks(buildServerFilters());
@@ -182,13 +174,8 @@ async function loadCallbacks({ showLoading = true } = {}) {
     renderSummary(filteredCallbacks);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load callbacks.";
-    if (showLoading) {
-      renderTableError(callbackTableBody, 8, message);
-      callbackSummaryPanel.innerHTML = `<div class="alert error">${escapeHtml(message)}</div>`;
-    }
-    showError(message);
-  } finally {
-    isCallbacksRefreshing = false;
+    renderTableError(callbackTableBody, 8, message);
+    callbackSummaryPanel.innerHTML = `<div class="alert error">${escapeHtml(message)}</div>`;
   }
 }
 
@@ -239,7 +226,7 @@ async function handleCallbackAction(action, callbackId) {
       showSuccess("Callback deleted.");
     }
 
-    await loadCallbacks({ showLoading: false });
+    await loadCallbacks();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to update the callback.";
     renderMessage(callbackDashboardMessage, "error", message);
@@ -278,16 +265,16 @@ callbackForm.addEventListener("reset", () => {
 
 callbackFiltersForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  await loadCallbacks({ showLoading: true });
+  await loadCallbacks();
 });
 
 clearFiltersButton.addEventListener("click", async () => {
   callbackFiltersForm.reset();
-  await loadCallbacks({ showLoading: true });
+  await loadCallbacks();
 });
 
 refreshCallbacksButton.addEventListener("click", async () => {
-  await loadCallbacks({ showLoading: true });
+  await loadCallbacks();
   showSuccess("Callback queue refreshed.");
 });
 
@@ -305,5 +292,5 @@ bootPage({
   subtitle: "Create, filter, reschedule, cancel, and execute smart callbacks.",
 });
 
-loadCallbacks({ showLoading: true });
-window.setInterval(() => loadCallbacks({ showLoading: false }), frontendConfig.refreshIntervals.callbacksMs);
+loadCallbacks();
+window.setInterval(loadCallbacks, frontendConfig.refreshIntervals.callbacksMs);

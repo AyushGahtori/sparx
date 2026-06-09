@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from datetime import datetime
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,8 +12,8 @@ from app.schemas.intelligence import (
     TranscriptEntryResponse,
 )
 from app.utils.phone import normalize_phone_number
-from app.utils.time import utc_now
 
+EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
 
 CallStatus = Literal[
     "initiated",
@@ -28,11 +29,20 @@ CallStatus = Literal[
 ]
 
 CallType = Literal["individual", "campaign"]
+ConversationStage = Literal[
+    "NEW",
+    "PRODUCT_INTRO",
+    "QUALIFICATION",
+    "INTERESTED",
+    "MEETING_PENDING",
+    "MEETING_BOOKED",
+]
 
 
 class IndividualCallRequest(BaseModel):
     lead_name: str = Field(min_length=2, max_length=120)
     phone: str = Field(pattern=r"^\+[1-9]\d{7,14}$")
+    email: str = Field(min_length=5, max_length=160)
     company: str | None = Field(default=None, max_length=120)
     city: str | None = Field(default=None, max_length=120)
     role: str | None = Field(default=None, max_length=120)
@@ -42,9 +52,6 @@ class IndividualCallRequest(BaseModel):
     additional_context: str | None = Field(default=None, max_length=1000)
     language: str = Field(min_length=2, max_length=120)
     priority: Literal["low", "medium", "high"]
-    ai_callback_max_date: date | None = None
-    executive_callback_max_date: date | None = None
-    executive_callback_allowed_weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
 
     @field_validator("*", mode="before")
     @classmethod
@@ -59,11 +66,20 @@ class IndividualCallRequest(BaseModel):
     def normalize_phone(cls, value: str) -> str:
         return normalize_phone_number(value)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not EMAIL_PATTERN.match(normalized):
+            raise ValueError("Email ID must be a valid email address.")
+        return normalized
+
     @model_validator(mode="after")
     def ensure_required_strings(self) -> "IndividualCallRequest":
         required_fields = {
             "lead_name": self.lead_name,
             "phone": self.phone,
+            "email": self.email,
             "agent_id": self.agent_id,
             "call_objective": self.call_objective,
             "language": self.language,
@@ -71,16 +87,6 @@ class IndividualCallRequest(BaseModel):
         missing_fields = [name for name, value in required_fields.items() if not value]
         if missing_fields:
             raise ValueError(f"Missing required fields: {', '.join(missing_fields)}.")
-        today = utc_now().date()
-        if self.ai_callback_max_date and self.ai_callback_max_date < today:
-            raise ValueError("AI callback maximum date cannot be in the past.")
-        if self.executive_callback_max_date and self.executive_callback_max_date < today:
-            raise ValueError("Executive callback maximum date cannot be in the past.")
-        if not self.executive_callback_allowed_weekdays:
-            raise ValueError("At least one executive callback working day is required.")
-        for weekday in self.executive_callback_allowed_weekdays:
-            if weekday < 0 or weekday > 6:
-                raise ValueError("Executive callback working days must be numbers from 0 Monday through 6 Sunday.")
         return self
 
 
@@ -90,11 +96,16 @@ class CallStatusUpdateRequest(BaseModel):
     callback_requested: bool | None = None
     callback_time: datetime | None = None
     requested_time_raw: str | None = Field(default=None, max_length=200)
-    meeting_requested: bool | None = None
     meeting_time: str | None = Field(default=None, max_length=120)
+    meeting_requested: bool | None = None
     duration: int | None = Field(default=None, ge=0)
+    conversation_stage: ConversationStage | None = None
+    product_intro_completed: bool | None = None
+    previous_call_summary: str | None = Field(default=None, max_length=1200)
+    meeting_booked: bool | None = None
+    next_action: str | None = Field(default=None, max_length=200)
 
-    @field_validator("notes", "requested_time_raw", "meeting_time", mode="before")
+    @field_validator("notes", "requested_time_raw", "meeting_time", "previous_call_summary", "next_action", mode="before")
     @classmethod
     def strip_notes(cls, value):
         if isinstance(value, str):
@@ -104,9 +115,14 @@ class CallStatusUpdateRequest(BaseModel):
 
 
 class CallResponse(BaseModel):
+    conversation_stage: ConversationStage = "NEW"
+    product_intro_completed: bool = False
+    previous_call_summary: str | None = None
+    meeting_booked: bool = False
     call_id: str
     lead_name: str
     phone: str
+    email: str | None = None
     company: str | None = None
     city: str | None = None
     role: str | None = None
@@ -134,6 +150,13 @@ class CallResponse(BaseModel):
     ended_at: datetime | None = None
     duration: int | None = None
     twilio_call_sid: str | None = None
+    recording_sid: str | None = None
+    recording_url: str | None = None
+    recording_status: str | None = None
+    recording_duration: int | None = None
+    recording_channels: int | None = None
+    recording_source: str | None = None
+    recording_available_at: datetime | None = None
     deepgram_agent_id: str | None = None
     deepgram_request_id: str | None = None
     transcript: list[TranscriptEntryResponse] = Field(default_factory=list)
@@ -181,6 +204,19 @@ class TwilioStreamCallbackPayload(BaseModel):
     timestamp: str | None = None
 
 
+class TwilioRecordingCallbackPayload(BaseModel):
+    account_sid: str | None = None
+    call_sid: str
+    recording_sid: str
+    recording_url: str | None = None
+    recording_status: str
+    recording_duration: int | None = None
+    recording_channels: int | None = None
+    recording_source: str | None = None
+    recording_start_time: str | None = None
+    timestamp: str | None = None
+
+
 class WebhookAckResponse(BaseModel):
     received: bool = True
     message: str = "Webhook processed."
@@ -189,3 +225,31 @@ class WebhookAckResponse(BaseModel):
 class CallDeleteResponse(BaseModel):
     deleted: bool = True
     call_id: str
+
+
+class MeetingConfirmationIntentRequest(BaseModel):
+    intent: Literal["confirm", "call_later"]
+    preferred_time_raw: str | None = Field(default=None, max_length=200)
+
+    @field_validator("preferred_time_raw", mode="before")
+    @classmethod
+    def strip_preferred_time(cls, value):
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_preferred_time(self) -> "MeetingConfirmationIntentRequest":
+        if self.intent == "call_later" and not self.preferred_time_raw:
+            raise ValueError("preferred_time_raw is required when intent is 'call_later'.")
+        return self
+
+
+class MeetingConfirmationIntentResponse(BaseModel):
+    call_id: str
+    intent: Literal["confirm", "call_later"]
+    message: str
+    callback_id: str | None = None
+    preferred_time_raw: str | None = None
+    normalized_callback_time: datetime | None = None

@@ -31,6 +31,7 @@ Business rules and context:
 - Call ID: {call_document.call_id}
 - Call Type: {call_document.call_type}
 - Lead Name: {call_document.lead_name}
+- Lead Email From Form: {call_document.email or "Not provided"}
 - Company: {call_document.company or "Not provided"}
 - Role: {call_document.role or "Not provided"}
 - Interest: {call_document.interest or "Not provided"}
@@ -60,6 +61,9 @@ Output requirements:
 - call_outcome: one of successful, interested, callback, meeting_requested, not_interested, failed
 - outcome_reason: concise explanation grounded in transcript evidence
 - ai_score: integer from 0 to 100 representing overall confidence based on transcript clarity, evidence quality, and response certainty
+- If the lead asks to be called later, says they are busy and asks for a later call, or asks for a callback, set call_outcome to callback and include the requested timing in next_action when available.
+- If Lead Email From Form is provided, treat it as already available before the call. Do not say the agent collected a different email unless the transcript clearly shows the lead corrected it.
+- If the lead clearly corrects or replaces the saved email, base meeting follow-up notes on the corrected email instead of the form email.
 
 Transcript:
 {transcript_block}

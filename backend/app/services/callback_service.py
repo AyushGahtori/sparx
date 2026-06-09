@@ -34,7 +34,7 @@ from app.services.callback_time_service import (
     CallbackTimeService,
     get_callback_time_service,
 )
-from app.utils.time import utc_now
+from app.utils.time import coerce_utc, utc_now
 
 
 class CallbackService:
@@ -50,7 +50,6 @@ class CallbackService:
         runner_service: CallbackRunnerService,
         sync_service: CallbackSyncService,
         duplicate_window_minutes: int,
-        dashboard_list_limit: int,
     ) -> None:
         self.callback_repository = callback_repository
         self.agent_service = agent_service
@@ -59,7 +58,6 @@ class CallbackService:
         self.runner_service = runner_service
         self.sync_service = sync_service
         self.duplicate_window_minutes = duplicate_window_minutes
-        self.dashboard_list_limit = dashboard_list_limit
 
     async def list_callbacks(
         self,
@@ -77,7 +75,6 @@ class CallbackService:
             source=source,
             date_from=date_from,
             date_to=date_to,
-            limit=self.dashboard_list_limit,
         )
         callbacks.sort(key=self._sort_key)
         return [self._to_response(callback_document) for callback_document in callbacks]
@@ -107,9 +104,6 @@ class CallbackService:
         callback_document = CallbackDocument(
             id=callback_id,
             callback_id=callback_id,
-            call_id=payload.call_id,
-            campaign_id=payload.campaign_id,
-            contact_id=payload.contact_id,
             lead_name=payload.lead_name,
             phone=payload.phone,
             company=payload.company,
@@ -134,7 +128,6 @@ class CallbackService:
             updated_at=created_at,
             notes=payload.notes,
             metadata={
-                **deepcopy(payload.metadata),
                 "parser_strategy": time_resolution.parser_strategy,
                 "agent_source": agent_configuration.metadata.get("source", "local_config"),
             },
@@ -294,7 +287,7 @@ class CallbackService:
             if callback_document.status not in self.open_statuses:
                 continue
             delta_minutes = abs(
-                (callback_document.normalized_callback_time - normalized_time).total_seconds()
+                (coerce_utc(callback_document.normalized_callback_time) - coerce_utc(normalized_time)).total_seconds()
             ) / 60
             if delta_minutes <= self.duplicate_window_minutes:
                 raise AppError(
@@ -308,8 +301,8 @@ class CallbackService:
         priority_order = {"high": 0, "medium": 1, "low": 2}
         return (
             priority_order[callback_document.priority],
-            callback_document.normalized_callback_time,
-            callback_document.created_at or utc_now(),
+            coerce_utc(callback_document.normalized_callback_time),
+            coerce_utc(callback_document.created_at or utc_now()),
         )
 
     @staticmethod
@@ -333,5 +326,4 @@ def get_callback_service() -> CallbackService:
         runner_service=get_callback_runner_service(),
         sync_service=get_callback_sync_service(),
         duplicate_window_minutes=settings.callback_duplicate_window_minutes,
-        dashboard_list_limit=settings.dashboard_list_limit,
     )

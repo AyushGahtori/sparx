@@ -8,11 +8,21 @@ export function renderSidebar() {
   }
 
   const currentPageKey = getCurrentPageKey();
+  const iconMap = {
+    dashboard: "D",
+    "manual-call": "M",
+    campaigns: "C",
+    callbacks: "Q",
+    "meeting-details": "N",
+    "call-history": "H",
+    summaries: "A",
+    settings: "S",
+  };
   const linksMarkup = getSidebarItems()
     .map((item) => {
       const isActive = item.key === currentPageKey;
       return `
-        <a class="sidebar-link ${isActive ? "active" : ""}" href="${toPageHref(item.key)}" data-page-key="${item.key}">
+        <a class="sidebar-link ${isActive ? "active" : ""}" href="${toPageHref(item.key)}" data-page-key="${item.key}" data-icon="${escapeHtml(iconMap[item.key] || item.label[0])}">
           <span>${escapeHtml(item.label)}</span>
         </a>
       `;
@@ -22,14 +32,24 @@ export function renderSidebar() {
   root.innerHTML = `
     <div class="sidebar">
       <div class="sidebar-brand">
-        <a href="${toPageHref("home")}">SPARX</a>
-        <span class="sidebar-caption">AI Agent Calling Module</span>
+        <div class="sidebar-brand-row">
+          <span class="sidebar-logo" aria-hidden="true">SX</span>
+          <div>
+            <a href="${toPageHref("home")}">SPARX</a>
+            <span class="sidebar-caption">Control Center</span>
+          </div>
+        </div>
+        <div class="sidebar-system-card">
+          <strong>AI Sales Automation</strong>
+          <span>Calls, campaigns, callbacks, and post-call intelligence.</span>
+        </div>
       </div>
       <nav class="sidebar-nav" aria-label="Primary">
         ${linksMarkup}
       </nav>
       <div class="sidebar-footer">
-        Backend-integrated MVP dashboard
+        <span class="sidebar-footer-kbd">Ctrl K</span>
+        <span>Command palette and global navigation</span>
       </div>
     </div>
   `;

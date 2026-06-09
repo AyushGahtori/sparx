@@ -77,6 +77,7 @@ class TwilioService:
         media_stream_url: str,
         status_callback_url: str,
         stream_status_callback_url: str,
+        recording_status_callback_url: str,
         custom_parameters: dict[str, str],
     ) -> TwilioOutboundCallResult:
         if not self.is_configured:
@@ -93,19 +94,52 @@ class TwilioService:
         )
 
         try:
-            call = self.get_client().calls.create(
-                to=to_phone,
-                from_=self.settings.twilio_phone_number,
-                twiml=twiml,
-                status_callback=status_callback_url,
-                status_callback_method="POST",
-                status_callback_event=["initiated", "ringing", "answered", "completed"],
-            )
+            call_options = {
+                "to": to_phone,
+                "from_": self.settings.twilio_phone_number,
+                "twiml": twiml,
+                "status_callback": status_callback_url,
+                "status_callback_method": "POST",
+                "status_callback_event": ["initiated", "ringing", "answered", "completed"],
+            }
+            if self.settings.twilio_call_recording_enabled:
+                call_options.update(
+                    {
+                        "record": True,
+                        "recording_channels": "dual",
+                        "recording_status_callback": recording_status_callback_url,
+                        "recording_status_callback_method": "POST",
+                        "recording_status_callback_event": ["completed", "absent", "failed"],
+                    }
+                )
+            call = self.get_client().calls.create(**call_options)
         except TwilioException as exc:
             raise AppError(
                 status_code=502,
                 code="twilio_call_creation_failed",
                 message=f"Twilio failed to create the outbound call: {exc}",
+            ) from exc
+
+        return TwilioOutboundCallResult(
+            call_sid=call.sid,
+            status=call.status,
+        )
+
+    def complete_call(self, call_sid: str) -> TwilioOutboundCallResult:
+        if not self.is_configured:
+            raise AppError(
+                status_code=503,
+                code="twilio_not_configured",
+                message="Twilio is not configured.",
+            )
+
+        try:
+            call = self.get_client().calls(call_sid).update(status="completed")
+        except TwilioException as exc:
+            raise AppError(
+                status_code=502,
+                code="twilio_call_completion_failed",
+                message=f"Twilio failed to complete the call: {exc}",
             ) from exc
 
         return TwilioOutboundCallResult(
@@ -121,6 +155,7 @@ class TwilioService:
         custom_parameters: dict[str, str],
     ) -> str:
         response = Element("Response")
+        SubElement(response, "Say").text = "Please wait while I connect you to the SPARX assistant."
         connect = SubElement(response, "Connect")
         stream = SubElement(
             connect,

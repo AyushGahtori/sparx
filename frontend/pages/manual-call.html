@@ -18,16 +18,24 @@
         <div class="page-grid">
           <section class="panel page-intro">
             <span class="eyebrow">Manual Call</span>
-            <h2>Start an individual AI outbound call</h2>
-            <p>Enter the lead profile, select a Deepgram agent, and let SPARX trigger Twilio and track the call lifecycle.</p>
+            <h2>Guided AI calling workflow</h2>
+            <p>Move from contact profile to agent selection, call configuration, live execution, and post-call outcome review in one focused workspace.</p>
+          </section>
+
+          <section class="workflow-steps" aria-label="Manual call workflow">
+            <div class="workflow-step active"><span>01</span><strong>Contact</strong></div>
+            <div class="workflow-step"><span>02</span><strong>Agent</strong></div>
+            <div class="workflow-step"><span>03</span><strong>Configure</strong></div>
+            <div class="workflow-step"><span>04</span><strong>Live Status</strong></div>
+            <div class="workflow-step"><span>05</span><strong>Results</strong></div>
           </section>
 
           <div class="page-grid two-column">
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <h2>Lead Details</h2>
-                  <p class="panel-subtitle">All required fields map directly to the Phase 2 call API.</p>
+                  <h2>Contact Information & Call Configuration</h2>
+                  <p class="panel-subtitle">Required fields map directly to the existing individual call API payload.</p>
                 </div>
               </div>
               <div id="form-message"></div>
@@ -35,27 +43,31 @@
                 <div class="form-grid">
                   <div class="form-field">
                     <label for="lead-name">Lead Name</label>
-                    <input id="lead-name" name="lead_name" type="text" value="Rahul Sharma" required>
+                    <input id="lead-name" name="lead_name" type="text" placeholder="Lead full name" required>
                   </div>
                   <div class="form-field">
                     <label for="phone">Phone Number</label>
-                    <input id="phone" name="phone" type="tel" value="+91" required>
+                    <input id="phone" name="phone" type="tel" placeholder="+1 555 010 0100" required>
+                  </div>
+                  <div class="form-field">
+                    <label for="email">Email ID</label>
+                    <input id="email" name="email" type="email" placeholder="lead@example.com" required>
                   </div>
                   <div class="form-field">
                     <label for="company">Company</label>
-                    <input id="company" name="company" type="text" value="ABC Tech">
+                    <input id="company" name="company" type="text" placeholder="Company name">
                   </div>
                   <div class="form-field">
                     <label for="city">City</label>
-                    <input id="city" name="city" type="text" value="Delhi">
+                    <input id="city" name="city" type="text" placeholder="City">
                   </div>
                   <div class="form-field">
                     <label for="role">Role</label>
-                    <input id="role" name="role" type="text" value="Manager">
+                    <input id="role" name="role" type="text" placeholder="Lead role">
                   </div>
                   <div class="form-field">
                     <label for="interest">Interest</label>
-                    <input id="interest" name="interest" type="text" value="AI Automation">
+                    <input id="interest" name="interest" type="text" placeholder="Interest area">
                   </div>
                   <div class="form-field">
                     <label for="agent-id">Select Deepgram Agent</label>
@@ -63,15 +75,15 @@
                   </div>
                   <div class="form-field">
                     <label for="language">Language Preference</label>
-                    <input id="language" name="language" type="text" value="English + Hindi" required>
+                    <input id="language" name="language" type="text" placeholder="Preferred language" required>
                   </div>
                   <div class="form-field full-width">
                     <label for="call-objective">Call Objective</label>
-                    <input id="call-objective" name="call_objective" type="text" value="Discuss SPARX AI calling solution" required>
+                    <input id="call-objective" name="call_objective" type="text" placeholder="Call objective" required>
                   </div>
                   <div class="form-field full-width">
                     <label for="additional-context">Additional Context / Notes</label>
-                    <textarea id="additional-context" name="additional_context">Recently visited pricing page</textarea>
+                    <textarea id="additional-context" name="additional_context" placeholder="Optional notes, recent activity, or qualifying context"></textarea>
                   </div>
                   <div class="form-field">
                     <label for="priority">Priority</label>
@@ -80,36 +92,6 @@
                       <option value="medium">Medium</option>
                       <option value="low">Low</option>
                     </select>
-                  </div>
-                  <div class="form-field full-width">
-                    <label>Manual AI Callback Limit</label>
-                    <div class="schedule-policy-grid">
-                      <div class="form-field">
-                        <label for="ai-callback-max-date">Maximum Callback Date</label>
-                        <input id="ai-callback-max-date" name="ai_callback_max_date" type="date">
-                      </div>
-                    </div>
-                  </div>
-                  <div class="form-field full-width">
-                    <label>Manual Executive Call Request Limits</label>
-                    <div class="schedule-policy-grid">
-                      <div class="form-field">
-                        <label for="executive-callback-max-date">Maximum Executive Callback Date</label>
-                        <input id="executive-callback-max-date" name="executive_callback_max_date" type="date">
-                      </div>
-                      <div class="form-field">
-                        <label>Executive Working Days</label>
-                        <div class="checkbox-grid">
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="0" checked> Monday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="1" checked> Tuesday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="2" checked> Wednesday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="3" checked> Thursday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="4" checked> Friday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="5"> Saturday</label>
-                          <label><input type="checkbox" name="executive_callback_allowed_weekdays" value="6"> Sunday</label>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -130,61 +112,6 @@
               <div id="call-status-panel" class="empty-state">No call has been started yet.</div>
             </section>
           </div>
-
-          <div class="page-grid two-column">
-            <section class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Manual AI Callbacks</h2>
-                  <p class="panel-subtitle">Manual-call customers who asked the AI to call them again later.</p>
-                </div>
-                <span id="manual-ai-callback-count" class="status-pill scheduled">0</span>
-              </div>
-              <div class="table-shell">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Phone Number</th>
-                      <th>Scheduled Date</th>
-                      <th>Scheduled Time</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="manual-ai-callback-table-body">
-                    <tr><td colspan="5">Loading manual AI callbacks...</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Manual Executive Call Requests</h2>
-                  <p class="panel-subtitle">Manual-call customers who requested a real person from the team.</p>
-                </div>
-                <span id="manual-executive-request-count" class="status-pill scheduled">0</span>
-              </div>
-              <div class="table-shell">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Phone Number</th>
-                      <th>Scheduled Date</th>
-                      <th>Scheduled Time</th>
-                      <th>Status</th>
-                      <th>Assigned Executive</th>
-                    </tr>
-                  </thead>
-                  <tbody id="manual-executive-request-table-body">
-                    <tr><td colspan="6">Loading manual executive requests...</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
         </div>
       </main>
     </div>
@@ -193,6 +120,7 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
-  <script type="module" src="../js/manual-call.js?v=scheduling-limits"></script>
+  <script src="../runtime-config.js"></script>
+  <script type="module" src="../js/manual-call.js"></script>
 </body>
 </html>

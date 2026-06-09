@@ -2,27 +2,20 @@ import asyncio
 import base64
 import contextlib
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import date
 from functools import lru_cache
-from zoneinfo import ZoneInfo
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect as websocket_connect
 
-from app.actions.schedule_call_action import (
-    SCHEDULE_CALL_FUNCTION_DEFINITION,
-    ScheduleCallAction,
-    get_schedule_call_action,
-)
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.integrations.deepgram import DeepgramService, get_deepgram_service
 from app.schemas.call import CallResponse
-from app.schemas.scheduled_call import ScheduleCallActionRequest
 from app.services.call_service import CallService, get_call_service
-from app.utils.time import utc_now_iso
+from app.utils.lead_email import resolve_lead_email
 
 logger = get_logger(__name__)
 
@@ -35,21 +28,26 @@ class MediaSessionState:
     started: asyncio.Event = field(default_factory=asyncio.Event)
     settings_applied: asyncio.Event = field(default_factory=asyncio.Event)
     stop_requested: bool = False
+    auto_hangup_scheduled: bool = False
 
 
 class MediaBridgeService:
     audio_buffer_size_bytes = 10 * 160
     keepalive_interval_seconds = 5
+    auto_hangup_delay_seconds = 3.0
+    closing_agent_patterns = (
+        re.compile(r"\b(thank you|thanks) for (your time|speaking with me|talking with me)\s*[.!?]*$"),
+        re.compile(r"\b(thank you|thanks).{0,80}\b(bye|goodbye|take care|have a (great|nice|good) day)\b"),
+        re.compile(r"\b(bye|goodbye|take care)\s*[.!?]*$"),
+        re.compile(r"\b(have a (great|nice|good) day|talk to you soon|speak with you soon)\s*[.!?]*$"),
+        re.compile(r"\b(i'?ll|i will|we'?ll|we will) (end|close|disconnect) (the|this) call\b"),
+        re.compile(r"\b(the meeting is (booked|scheduled|confirmed)).{0,80}\b(thank you|thanks|bye|goodbye)\b"),
+    )
 
-    def __init__(
-        self,
-        deepgram_service: DeepgramService,
-        call_service: CallService,
-        schedule_call_action: ScheduleCallAction,
-    ) -> None:
+    def __init__(self, deepgram_service: DeepgramService, call_service: CallService) -> None:
         self.deepgram_service = deepgram_service
         self.call_service = call_service
-        self.schedule_call_action = schedule_call_action
+        self._auto_hangup_tasks: set[asyncio.Task] = set()
 
     async def bridge_call(self, twilio_websocket: WebSocket) -> None:
         await twilio_websocket.accept()
@@ -57,7 +55,8 @@ class MediaBridgeService:
         audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
 
         twilio_receiver_task = asyncio.create_task(
-            self._receive_from_twilio(twilio_websocket, state, audio_queue)
+            self._receive_from_twilio(twilio_websocket, state, audio_queue),
+            name="twilio_receiver",
         )
         background_tasks: list[asyncio.Task] = [twilio_receiver_task]
 
@@ -105,17 +104,20 @@ class MediaBridgeService:
                         twilio_websocket=twilio_websocket,
                         state=state,
                         call_id=state.call_id,
-                    )
+                    ),
+                    name="deepgram_receiver",
                 )
                 deepgram_sender_task = asyncio.create_task(
                     self._send_audio_to_deepgram(
                         deepgram_websocket=deepgram_websocket,
                         audio_queue=audio_queue,
                         state=state,
-                    )
+                    ),
+                    name="deepgram_sender",
                 )
                 keepalive_task = asyncio.create_task(
-                    self._send_keepalive(deepgram_websocket, state)
+                    self._send_keepalive(deepgram_websocket, state),
+                    name="deepgram_keepalive",
                 )
                 background_tasks.extend([deepgram_receiver_task, deepgram_sender_task, keepalive_task])
 
@@ -125,7 +127,15 @@ class MediaBridgeService:
                 )
 
                 for task in done:
+                    task_name = task.get_name()
                     exception = task.exception()
+                    await self.call_service.append_event(
+                        state.call_id,
+                        event_type="media_bridge_task_completed",
+                        message=f"The {task_name} task ended the media bridge session.",
+                        payload={"task": task_name, "had_exception": exception is not None},
+                    )
+                    logger.info("Media bridge task completed for call %s: %s", state.call_id, task_name)
                     if exception is not None:
                         raise exception
 
@@ -248,7 +258,6 @@ class MediaBridgeService:
             payload = json.loads(message)
             await self._handle_deepgram_text_event(
                 payload=payload,
-                deepgram_websocket=deepgram_websocket,
                 twilio_websocket=twilio_websocket,
                 state=state,
                 call_id=call_id,
@@ -326,7 +335,6 @@ class MediaBridgeService:
 
             await self._handle_deepgram_text_event(
                 payload=payload,
-                deepgram_websocket=deepgram_websocket,
                 twilio_websocket=twilio_websocket,
                 state=state,
                 call_id=call_id,
@@ -337,7 +345,6 @@ class MediaBridgeService:
         self,
         *,
         payload: dict[str, object],
-        deepgram_websocket,
         twilio_websocket: WebSocket,
         state: MediaSessionState,
         call_id: str,
@@ -353,14 +360,16 @@ class MediaBridgeService:
                 message="Deepgram emitted conversation text.",
                 payload=payload,
             )
-            return
-
-        if message_type == "FunctionCallRequest":
-            await self._handle_function_call_request(
-                payload=payload,
-                deepgram_websocket=deepgram_websocket,
-                call_id=call_id,
-            )
+            if self._is_closing_agent_message(payload) and not state.auto_hangup_scheduled:
+                state.auto_hangup_scheduled = True
+                task = asyncio.create_task(
+                    self._complete_call_after_agent_close(
+                        call_id=call_id,
+                        reason=str(payload.get("content") or "").strip(),
+                    )
+                )
+                self._auto_hangup_tasks.add(task)
+                task.add_done_callback(self._auto_hangup_tasks.discard)
             return
 
         if message_type == "UserStartedSpeaking" and state.stream_sid:
@@ -382,161 +391,6 @@ class MediaBridgeService:
                     details={"response": payload},
                 )
 
-    async def _handle_function_call_request(
-        self,
-        *,
-        payload: dict[str, object],
-        deepgram_websocket,
-        call_id: str,
-    ) -> None:
-        functions = payload.get("functions")
-        if not isinstance(functions, list):
-            await self.call_service.append_event(
-                call_id,
-                event_type="function_call_error",
-                message="Deepgram function call request did not include a functions array.",
-                payload=payload,
-            )
-            return
-
-        for function_call in functions:
-            if not isinstance(function_call, dict):
-                continue
-            response = await self._execute_function_call(function_call=function_call, call_id=call_id)
-            await deepgram_websocket.send(json.dumps(response, default=str))
-
-    async def _execute_function_call(
-        self,
-        *,
-        function_call: dict[str, object],
-        call_id: str,
-    ) -> dict[str, object]:
-        function_name = str(function_call.get("name") or "")
-        function_id = str(function_call.get("id") or "")
-
-        if function_name != ScheduleCallAction.name:
-            content = {
-                "error": "unsupported_function",
-                "message": f"Function '{function_name}' is not available in SPARX.",
-            }
-            await self.call_service.append_event(
-                call_id,
-                event_type="function_call_unsupported",
-                message=f"Deepgram requested unsupported function '{function_name}'.",
-                payload={"function_id": function_id, "function_name": function_name},
-            )
-            return self._build_function_response(function_id=function_id, function_name=function_name, content=content)
-
-        try:
-            arguments = self._parse_function_arguments(function_call.get("arguments"))
-            call_record = await self.call_service.get_call(call_id)
-            enriched_arguments = dict(arguments)
-            enriched_arguments["name"] = call_record.lead_name
-            enriched_arguments["phone"] = call_record.phone
-            enriched_arguments["call_id"] = call_record.call_id
-            enriched_arguments["call_type"] = call_record.call_type
-            enriched_arguments["campaign_id"] = call_record.campaign_id
-            enriched_arguments["contact_id"] = call_record.contact_id
-            if not enriched_arguments.get("timezone"):
-                enriched_arguments["timezone"] = self.schedule_call_action.settings.callback_default_timezone
-            enriched_arguments["scheduling_policy"] = deepcopy(call_record.metadata.get("scheduling_policy", {}))
-            action_payload = ScheduleCallActionRequest.model_validate(enriched_arguments)
-            self._validate_scheduling_policy(call_record, action_payload)
-            result = await self.schedule_call_action.execute(action_payload)
-            content = self._build_schedule_call_action_content(result)
-            await self.call_service.append_event(
-                call_id,
-                event_type="schedule_call_action_completed",
-                message="The voice agent created a scheduled call through schedule_call_action.",
-                payload={
-                    "function_id": function_id,
-                    "scheduled_call_id": result.scheduled_call_id,
-                    "type": result.type,
-                    "scheduled_time": result.scheduled_time.isoformat(),
-                    "communication_mode": result.communication_mode,
-                    "attendee_email": result.attendee_email,
-                    "google_meet_link": result.google_meet_link,
-                    "invite_email_status": result.invite_email_status,
-                },
-            )
-            return self._build_function_response(
-                function_id=function_id,
-                function_name=function_name,
-                content=content,
-            )
-        except Exception as exc:
-            content = {
-                "error": "schedule_call_action_failed",
-                "message": str(exc),
-            }
-            await self.call_service.append_event(
-                call_id,
-                event_type="schedule_call_action_failed",
-                message="The voice agent could not create a scheduled call through schedule_call_action.",
-                payload={
-                    "function_id": function_id,
-                    "error": str(exc),
-                },
-            )
-            return self._build_function_response(
-                function_id=function_id,
-                function_name=function_name,
-                content=content,
-            )
-
-    @staticmethod
-    def _parse_function_arguments(arguments: object) -> dict[str, object]:
-        if arguments is None:
-            return {}
-        if isinstance(arguments, dict):
-            return arguments
-        if isinstance(arguments, str):
-            parsed = json.loads(arguments or "{}")
-            if isinstance(parsed, dict):
-                return parsed
-        raise ValueError("Function arguments must be a JSON object.")
-
-    @staticmethod
-    def _build_function_response(
-        *,
-        function_id: str,
-        function_name: str,
-        content: dict[str, object],
-    ) -> dict[str, object]:
-        return {
-            "type": "FunctionCallResponse",
-            "id": function_id,
-            "name": function_name,
-            "content": json.dumps(content, default=str),
-        }
-
-    @staticmethod
-    def _build_schedule_call_action_content(result: object) -> dict[str, object]:
-        communication_mode = getattr(result, "communication_mode", "phone_call")
-        invite_status = getattr(result, "invite_email_status", "not_required")
-        scheduled_time = getattr(result, "scheduled_time", None)
-        content = {
-            "scheduled_call_id": getattr(result, "scheduled_call_id", None),
-            "type": getattr(result, "type", None),
-            "status": getattr(result, "status", None),
-            "scheduled_time": scheduled_time.isoformat() if scheduled_time else None,
-            "timezone": getattr(result, "timezone", None),
-            "communication_mode": communication_mode,
-            "attendee_email": getattr(result, "attendee_email", None),
-            "invite_email_status": invite_status,
-        }
-        if communication_mode == "google_meet":
-            content["message_for_customer"] = (
-                "The Google Meet calendar invite has been sent. Ask whether they received it. "
-                "Do not read the Meet URL or any backend fields aloud."
-                if invite_status == "sent"
-                else (
-                    "The Google Meet invite could not be sent right now. Tell the customer to check later, "
-                    "and explain that a normal executive phone call is also scheduled as fallback."
-                )
-            )
-        return content
-
     @staticmethod
     def _extract_deepgram_error_message(payload: dict[str, object]) -> str:
         return (
@@ -545,71 +399,72 @@ class MediaBridgeService:
             or "Deepgram returned an error while starting the voice agent session."
         )
 
-    def _validate_scheduling_policy(
-        self,
-        call_record: CallResponse,
-        payload: ScheduleCallActionRequest,
-    ) -> None:
-        policy = call_record.metadata.get("scheduling_policy")
-        if not isinstance(policy, dict):
-            return
+    async def _complete_call_after_agent_close(self, *, call_id: str, reason: str) -> None:
+        await asyncio.sleep(self.auto_hangup_delay_seconds)
+        try:
+            await self.call_service.complete_active_call(call_id, reason=reason)
+        except Exception as exc:
+            logger.warning("Unable to auto-complete call %s after closing phrase: %s", call_id, exc)
 
-        flow_policy = policy.get(payload.type)
-        if not isinstance(flow_policy, dict):
-            return
+    @classmethod
+    def _is_closing_agent_message(cls, payload: dict[str, object]) -> bool:
+        role = str(payload.get("role") or "").strip().lower()
+        if role != "assistant":
+            return False
 
-        scheduled_local_date = self._scheduled_local_date(payload)
-        max_date_value = flow_policy.get("max_scheduled_date")
-        if max_date_value:
-            max_date = date.fromisoformat(str(max_date_value))
-            if scheduled_local_date > max_date:
-                raise AppError(
-                    status_code=400,
-                    code="schedule_outside_allowed_window",
-                    message=(
-                        f"The requested {payload.type.replace('_', ' ')} date is outside the allowed scheduling "
-                        f"window. Offer a date on or before {max_date.isoformat()}."
-                    ),
-                )
+        content = " ".join(str(payload.get("content") or "").strip().lower().split())
+        if not content:
+            return False
 
-        allowed_weekdays = flow_policy.get("allowed_weekdays")
-        if payload.type == "executive_callback" and isinstance(allowed_weekdays, list) and allowed_weekdays:
-            normalized_weekdays = {int(weekday) for weekday in allowed_weekdays}
-            if scheduled_local_date.weekday() not in normalized_weekdays:
-                raise AppError(
-                    status_code=400,
-                    code="schedule_outside_working_days",
-                    message=(
-                        "The requested executive callback date is outside the allowed working days. "
-                        f"Offer one of these working days instead: {self._format_weekdays(sorted(normalized_weekdays))}."
-                    ),
-                )
-
-    def _scheduled_local_date(self, payload: ScheduleCallActionRequest) -> date:
-        timezone_name = payload.timezone or self.schedule_call_action.settings.callback_default_timezone
-        target_timezone = ZoneInfo(timezone_name)
-        scheduled_time = payload.scheduled_time
-        if scheduled_time.tzinfo is None:
-            scheduled_time = scheduled_time.replace(tzinfo=target_timezone)
-        else:
-            scheduled_time = scheduled_time.astimezone(target_timezone)
-        return scheduled_time.date()
-
-    @staticmethod
-    def _format_weekdays(weekdays: list[int]) -> str:
-        weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        return ", ".join(weekday_names[weekday] for weekday in weekdays if 0 <= weekday <= 6)
+        explicit_closing_phrases = (
+            "i will end the call now",
+            "i'll end the call now",
+            "i am ending the call now",
+            "you can disconnect now",
+        )
+        short_closing_phrases = {"thank you", "thanks", "thank you so much", "thanks so much"}
+        return content.strip(".!?") in short_closing_phrases or any(
+            phrase in content for phrase in explicit_closing_phrases
+        ) or any(
+            pattern.search(content) for pattern in cls.closing_agent_patterns
+        )
 
     @staticmethod
     def _build_agent_payload(call_record: CallResponse) -> dict[str, object] | str:
         metadata = deepcopy(call_record.metadata)
         campaign_context = metadata.get("campaign_context") or {}
-        scheduling_policy = metadata.get("scheduling_policy") or {}
-        scheduling_policy_text = MediaBridgeService._format_scheduling_policy_for_prompt(scheduling_policy)
+        product_brief = campaign_context.get("product_brief") or {}
+        lead_profile = {
+            **(metadata.get("lead_profile") or {}),
+            **(campaign_context.get("lead_profile") or {}),
+        }
+        saved_email = resolve_lead_email(direct_email=call_record.email, metadata=metadata)
+        callback_context = metadata.get("callback_context") or {}
+        conversation_state = callback_context.get("conversation_state") or metadata.get("conversation_state") or {}
+        stage = conversation_state.get("stage") or call_record.conversation_stage
+        product_intro_completed = bool(
+            conversation_state.get("product_intro_completed", call_record.product_intro_completed)
+        )
+        product_label = (
+            campaign_context.get("product_name")
+            or product_brief.get("product_name")
+            or "SPARX AI Calling Solution"
+        )
+        previous_summary = (
+            conversation_state.get("previous_call_summary")
+            or call_record.previous_call_summary
+            or call_record.summary
+            or "Not available"
+        )
+        callback_opening = MediaBridgeService._build_callback_opening_guidance(
+            call_record=call_record,
+            callback_context=callback_context,
+            previous_summary=str(previous_summary),
+        )
+
         call_brief_lines = [
             "Call context for the outbound conversation.",
             f"Lead Name: {call_record.lead_name}",
-            f"Lead Phone Number: {call_record.phone}",
             f"Company: {call_record.company or 'Not provided'}",
             f"City: {call_record.city or 'Not provided'}",
             f"Role: {call_record.role or 'Not provided'}",
@@ -617,18 +472,38 @@ class MediaBridgeService:
             f"Call Objective: {call_record.call_objective}",
             f"Language Preference: {call_record.language}",
             f"Priority: {call_record.priority}",
+            f"Product Name: {product_label}",
+            f"Product Description: {product_brief.get('product_description') or 'Not provided'}",
+            f"Value Proposition: {product_brief.get('value_proposition') or 'Not provided'}",
+            f"Target Audience: {product_brief.get('target_audience') or 'Not provided'}",
+            f"Qualification Criteria: {product_brief.get('qualification_criteria') or 'Not provided'}",
+            f"Objection Handling Guidance: {product_brief.get('objection_handling') or 'Not provided'}",
+            f"Meeting Goal: {product_brief.get('meeting_goal') or call_record.call_objective}",
             f"Additional Context: {call_record.additional_context or 'None'}",
-            f"Scheduling Limits: {scheduling_policy_text}",
-            f"Current System Time: {utc_now_iso()}",
+            f"Previous Conversation Stage: {stage}",
+            f"Product Intro Completed: {'yes' if product_intro_completed else 'no'}",
+            f"Previous Call Summary: {previous_summary}",
+            f"Callback Requested: {'yes' if call_record.callback_requested else 'no'}",
+            f"Callback Requested Time: {call_record.callback_time.isoformat() if call_record.callback_time else 'Not provided'}",
+            f"Lead Email: {saved_email or 'Not provided'}",
+            f"Lead Website: {lead_profile.get('website') or 'Not provided'}",
+            f"Lead Geography: {', '.join(part for part in [call_record.city, lead_profile.get('state'), lead_profile.get('country')] if part) or 'Not provided'}",
+            f"Lead Notes: {lead_profile.get('notes') or 'None'}",
         ]
+        if callback_opening:
+            call_brief_lines.extend(
+                [
+                    f"Required Opening: {callback_opening['opening']}",
+                    f"Required Callback Handling: {callback_opening['instruction']}",
+                ]
+            )
 
         if campaign_context:
-            campaign_instructions = campaign_context.get("notes") or call_record.additional_context
             call_brief_lines.extend(
                 [
                     f"Campaign Name: {campaign_context.get('campaign_name') or 'Not provided'}",
                     f"Campaign Type: {campaign_context.get('campaign_type') or 'Not provided'}",
-                    f"Campaign Instructions: {campaign_instructions or 'None'}",
+                    f"Campaign Notes: {campaign_context.get('notes') or 'None'}",
                 ]
             )
 
@@ -636,97 +511,144 @@ class MediaBridgeService:
             "Use this context to guide the conversation and do not read the full brief verbatim unless it is useful."
         )
         call_brief = "\n".join(call_brief_lines)
+        stage_guidance = MediaBridgeService._build_stage_guidance(
+            lead_name=call_record.lead_name,
+            stage=str(stage),
+            product_intro_completed=product_intro_completed,
+            meeting_booked=call_record.meeting_booked,
+            product_label=product_label,
+        )
 
         agent_configuration = metadata.get("agent_configuration")
         if not agent_configuration:
             return call_record.deepgram_agent_id or call_record.agent_id
 
         agent_payload = deepcopy(agent_configuration)
-        think = agent_payload.setdefault("think", {})
-        functions = think.setdefault("functions", [])
-        if not any(function.get("name") == ScheduleCallAction.name for function in functions if isinstance(function, dict)):
-            functions.append(deepcopy(SCHEDULE_CALL_FUNCTION_DEFINITION))
-
-        prompt = str(think.get("prompt") or "")
-        if ScheduleCallAction.name not in prompt:
-            think["prompt"] = (
-                f"{prompt}\n\n"
-                "Scheduling workflow rules. Follow this order exactly when a customer asks for a callback, "
-                "says this is not a good time, or requests to speak with a real person. Do not skip steps, "
-                "do not repeat completed steps, and do not ask for information already available in the call context.\n"
-                "1. If the customer wants the AI to call back later, collect and confirm a clear date and time. "
-                "If the requested time is outside the scheduling limits in the call context, do not call the action. "
-                "Politely explain that the time is outside the allowed window and ask for another date or time "
-                f"that fits the listed limits. After the customer confirms a valid time, call {ScheduleCallAction.name} "
-                "with type ai_callback.\n"
-                "2. If the customer wants a human executive, sales person, representative, or real person, first "
-                "collect and confirm a clear date and time. Do not discuss the phone number yet.\n"
-                "3. After the executive call date and time is confirmed, ask exactly which communication mode they prefer: "
-                "'Would you prefer our executive to call you on this phone number, or should I send a Google Meet link "
-                "to your email?' This question must happen before any phone-number confirmation.\n"
-                "4. If the customer chooses a normal phone call, only then confirm the existing phone number naturally, "
-                "for example: 'Great, we will use this same number for our executive to call you at 3:30 PM. Is that okay?' "
-                "You already know the current call's phone number from the call context, so do not ask the customer "
-                "for their number, do not ask them to spell their number, and do not request a new number unless they "
-                "clearly say they want to use a different number. After they confirm, call "
-                f"{ScheduleCallAction.name} with type executive_callback and communication_mode phone_call.\n"
-                "5. If the customer chooses Google Meet, ask them to spell their Gmail address slowly. Normalize spoken "
-                "words like 'at' and 'dot'. Then repeat the complete normalized email in a confirmation-friendly way: "
-                "read each word or segment and also spell every character, for example "
-                "'g a h t o r i a y u s h two five at gmail dot com'. Ask 'Is that correct?' Wait for a clear yes "
-                "before calling the action.\n"
-                "6. Only after that email confirmation, call "
-                f"{ScheduleCallAction.name} with type executive_callback, communication_mode google_meet, attendee_email, "
-                "and attendee_email_confirmed true. If the customer has not confirmed the spelled email, do not call "
-                "the action. If the action rejects the email because it was not confirmed, apologize, spell the email "
-                "again, ask for confirmation again, and retry only after a clear yes.\n"
-                "7. After a Google Meet action succeeds, ask if they received the invite. Do not read any raw URL, JSON, "
-                "HTTPS link, event id, backend field, or function result aloud. If they say no, tell them it can take "
-                "a few minutes, ask them to check spam/all mail, and explain that a normal executive call is also "
-                "scheduled as fallback.\n"
-                "Do not rely on a spoken promise alone for scheduling. The schedule_call_action is required for every "
-                "AI callback, phone executive callback, and Google Meet executive callback."
-            ).strip()
-        else:
-            think["prompt"] = prompt
-
-        if campaign_context:
-            campaign_instructions = str(campaign_context.get("notes") or call_record.additional_context or "").strip()
-            if campaign_instructions:
-                think["prompt"] = (
-                    f"{think['prompt']}\n\n"
-                    "Campaign-specific instructions from the operator dashboard:\n"
-                    f"{campaign_instructions}\n\n"
-                    "For this campaign call, follow the campaign-specific instructions above when they differ "
-                    "from the default agent prompt, while still staying truthful, concise, and compliant."
-                ).strip()
-
+        # Enforce personalized greeting so the lead hears their name at the start.
+        agent_payload["greeting"] = (
+            callback_opening["opening"]
+            if callback_opening
+            else (
+                f"Hello {call_record.lead_name}, this is the SPARX AI assistant. "
+                f"I am calling regarding {product_label}."
+            )
+        )
         context = agent_payload.setdefault("context", {})
         messages = context.setdefault("messages", [])
+        messages.append(
+            {
+                "type": "History",
+                "role": "user",
+                "content": (
+                    "Conversation control rules:\n"
+                    "1) Always greet the lead by name.\n"
+                    f"2) If stage is NEW or PRODUCT_INTRO, or product intro is incomplete, explain {product_label} before asking for a meeting.\n"
+                    "3) If stage is QUALIFICATION, continue discovery questions.\n"
+                    "4) If stage is INTERESTED, handle objections/questions and move toward scheduling.\n"
+                    "5) If stage is MEETING_PENDING, focus on booking the meeting.\n"
+                    "6) If stage is MEETING_BOOKED, confirm details and close politely.\n"
+                    "7) Never assume the user knows the product unless context explicitly says intro completed.\n"
+                    "8) If Lead Email is provided, confirm it once before sending meeting details. If the lead corrects or replaces it, repeat the new address clearly and use that new email.\n"
+                    "9) Ask for the lead's email only when Lead Email is Not provided or the lead says the saved email is wrong."
+                ),
+            }
+        )
+        if callback_opening:
+            messages.append(
+                {
+                    "type": "History",
+                    "role": "user",
+                    "content": (
+                        "Callback opening rules:\n"
+                        f"1) Start with exactly this meaning: {callback_opening['opening']}\n"
+                        f"2) {callback_opening['instruction']}\n"
+                        "3) Use the previous context before asking any new question.\n"
+                        "4) Do not restart the product pitch unless the context says product intro is incomplete."
+                    ),
+                }
+            )
+        messages.append({"type": "History", "role": "user", "content": stage_guidance})
         messages.append({"type": "History", "role": "user", "content": call_brief})
         return agent_payload
 
     @staticmethod
-    def _format_scheduling_policy_for_prompt(policy: object) -> str:
-        if not isinstance(policy, dict) or not policy:
-            return "No custom scheduling limits were configured."
+    def _build_callback_opening_guidance(
+        *,
+        call_record: CallResponse,
+        callback_context: dict[str, object],
+        previous_summary: str,
+    ) -> dict[str, str] | None:
+        if not call_record.callback_id and not callback_context:
+            return None
 
-        ai_policy = policy.get("ai_callback") if isinstance(policy.get("ai_callback"), dict) else {}
-        executive_policy = (
-            policy.get("executive_callback")
-            if isinstance(policy.get("executive_callback"), dict)
-            else {}
-        )
-        ai_max_date = ai_policy.get("max_scheduled_date") or "No maximum date"
-        executive_max_date = executive_policy.get("max_scheduled_date") or "No maximum date"
-        executive_weekdays = executive_policy.get("allowed_weekdays")
-        weekday_text = "Any day"
-        if isinstance(executive_weekdays, list) and executive_weekdays:
-            weekday_text = MediaBridgeService._format_weekdays([int(day) for day in executive_weekdays])
-        return (
-            f"AI callbacks may be scheduled on any day until {ai_max_date}. "
-            f"Executive callbacks may be scheduled until {executive_max_date}; allowed working days: {weekday_text}."
-        )
+        cancellation_context = callback_context.get("meeting_cancellation_followup")
+        if isinstance(cancellation_context, dict):
+            reason = str(cancellation_context.get("cancel_reason") or "").strip()
+            reason_suffix = f" Reason: {reason}." if reason else ""
+            return {
+                "opening": (
+                    f"Hello {call_record.lead_name}, this is the SPARX AI assistant. "
+                    "You were not available at the meeting time, so I am calling about your cancelled meeting. "
+                    "Would you like to reschedule your meeting or not?"
+                ),
+                "instruction": (
+                    "Explain briefly that the meeting was cancelled."
+                    f"{reason_suffix} Ask only whether they want to reschedule. "
+                    "If yes, collect the new meeting date and time and confirm the email address. "
+                    "If no, thank them politely and end without scheduling another callback."
+                ),
+            }
+
+        origin_status = str(callback_context.get("origin_status") or "").strip()
+        callback_reason = str(callback_context.get("callback_reason") or "").strip()
+        requested_time = str(callback_context.get("requested_time_raw") or "").strip()
+        if origin_status == "callback_requested" or "callback" in callback_reason.lower() or call_record.callback_requested:
+            requested_suffix = f" You asked us to call at {requested_time}." if requested_time else ""
+            summary_suffix = "" if previous_summary == "Not available" else f" Context from that discussion: {previous_summary}"
+            return {
+                "opening": (
+                    f"Hello {call_record.lead_name}, this is the SPARX AI assistant. "
+                    f"As per our previous discussion, I am calling you back.{requested_suffix}"
+                ),
+                "instruction": (
+                    "Resume from the previous discussion before asking new questions."
+                    f"{summary_suffix} Continue the conversation naturally and use the saved context."
+                ),
+            }
+
+        return None
+
+    @staticmethod
+    def _build_stage_guidance(
+        *,
+        lead_name: str,
+        stage: str,
+        product_intro_completed: bool,
+        meeting_booked: bool,
+        product_label: str,
+    ) -> str:
+        if meeting_booked or stage == "MEETING_BOOKED":
+            return (
+                f"Greet {lead_name} by name, confirm booked meeting details, and end politely."
+            )
+        if stage == "MEETING_PENDING":
+            return (
+                f"Greet {lead_name} by name, confirm interest, and focus on scheduling the meeting now."
+            )
+        if stage == "INTERESTED":
+            return (
+                f"Greet {lead_name} by name, resume from prior interest, answer objections, and ask for meeting time."
+            )
+        if stage == "QUALIFICATION":
+            return (
+                f"Greet {lead_name} by name, then continue qualification and discovery questions."
+            )
+        if stage in {"NEW", "PRODUCT_INTRO"} or not product_intro_completed:
+            return (
+                f"Greet {lead_name} by name. Prospect may not know the product yet. "
+                f"Introduce {product_label} first, then continue discovery."
+            )
+        return f"Greet {lead_name} by name and continue naturally from previous context."
 
 
 @lru_cache
@@ -734,5 +656,4 @@ def get_media_bridge_service() -> MediaBridgeService:
     return MediaBridgeService(
         deepgram_service=get_deepgram_service(),
         call_service=get_call_service(),
-        schedule_call_action=get_schedule_call_action(),
     )

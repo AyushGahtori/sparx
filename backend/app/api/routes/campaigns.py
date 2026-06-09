@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from app.schemas.campaign import (
     CampaignCreateRequest,
     CampaignCsvPreviewResponse,
+    CampaignDataResponse,
     CampaignDeleteResponse,
     CampaignContactResponse,
     CampaignResponse,
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/campaigns")
 
 
 @router.post("/preview-csv", response_model=CampaignCsvPreviewResponse)
+@router.post("/preview-leads", response_model=CampaignCsvPreviewResponse)
 async def preview_campaign_csv(
     file: UploadFile = File(...),
     campaign_service: CampaignService = Depends(get_campaign_service),
@@ -49,6 +51,14 @@ async def get_campaign_contacts(
     campaign_service: CampaignService = Depends(get_campaign_service),
 ) -> list[CampaignContactResponse]:
     return await campaign_service.get_campaign_contacts(campaign_id)
+
+
+@router.get("/{campaign_id}/data", response_model=CampaignDataResponse)
+async def get_campaign_data(
+    campaign_id: str,
+    campaign_service: CampaignService = Depends(get_campaign_service),
+) -> CampaignDataResponse:
+    return await campaign_service.get_campaign_data(campaign_id)
 
 
 @router.post("/{campaign_id}/start", response_model=CampaignResponse)

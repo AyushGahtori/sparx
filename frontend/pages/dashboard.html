@@ -18,17 +18,44 @@
         <div class="page-grid">
           <section class="panel page-intro">
             <span class="eyebrow">Overview</span>
-            <h2>Platform activity and operational health</h2>
-            <p>Track calling volume, campaigns, callback workload, and AI output from one admin dashboard.</p>
+            <h2>Executive command dashboard for AI sales operations</h2>
+            <p>Track calling volume, active campaigns, callback workload, meeting conversion, and AI intelligence coverage from one premium operations cockpit.</p>
           </section>
 
           <section id="dashboard-kpis" class="card-grid">
             <div class="stat-card"><span class="stat-label">Total Calls</span><span class="stat-value">-</span></div>
-            <div class="stat-card"><span class="stat-label">Campaign Calls</span><span class="stat-value">-</span></div>
-            <div class="stat-card"><span class="stat-label">Manual Calls</span><span class="stat-value">-</span></div>
-            <div class="stat-card"><span class="stat-label">Callbacks Pending</span><span class="stat-value">-</span></div>
-            <div class="stat-card"><span class="stat-label">Meetings Requested</span><span class="stat-value">-</span></div>
-            <div class="stat-card"><span class="stat-label">Hot Leads</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Active Campaigns</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Callback Queue</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Meetings Scheduled</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">AI Success Rate</span><span class="stat-value">-</span></div>
+            <div class="stat-card"><span class="stat-label">Conversion Rate</span><span class="stat-value">-</span></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Analytics Overview</h2>
+                <p class="panel-subtitle">Visual trend surfaces for calls, meetings, campaigns, and callback completion.</p>
+              </div>
+            </div>
+            <div class="analytics-grid">
+              <div class="analytics-card">
+                <span class="analytics-label">Calls over time</span>
+                <div class="sparkline" aria-hidden="true"><span style="height: 38%"></span><span style="height: 58%"></span><span style="height: 46%"></span><span style="height: 72%"></span><span style="height: 64%"></span><span style="height: 86%"></span></div>
+              </div>
+              <div class="analytics-card">
+                <span class="analytics-label">Meeting trends</span>
+                <div class="sparkline" aria-hidden="true"><span style="height: 28%"></span><span style="height: 44%"></span><span style="height: 52%"></span><span style="height: 50%"></span><span style="height: 76%"></span><span style="height: 68%"></span></div>
+              </div>
+              <div class="analytics-card">
+                <span class="analytics-label">Campaign performance</span>
+                <div class="sparkline" aria-hidden="true"><span style="height: 48%"></span><span style="height: 54%"></span><span style="height: 62%"></span><span style="height: 78%"></span><span style="height: 74%"></span><span style="height: 90%"></span></div>
+              </div>
+              <div class="analytics-card">
+                <span class="analytics-label">Callback completion</span>
+                <div class="sparkline" aria-hidden="true"><span style="height: 34%"></span><span style="height: 42%"></span><span style="height: 58%"></span><span style="height: 66%"></span><span style="height: 71%"></span><span style="height: 82%"></span></div>
+              </div>
+            </div>
           </section>
 
           <div class="page-grid two-column">
@@ -117,6 +144,7 @@
   <div id="modal-root" class="modal-root"></div>
   <div id="toast-root" class="toast-root"></div>
 
+  <script src="../runtime-config.js"></script>
   <script type="module" src="../js/dashboard.js"></script>
 </body>
 </html>
