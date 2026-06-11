@@ -31,7 +31,10 @@ class CallbackRepository:
     def create_callback(self, callback_document: CallbackDocument) -> CallbackDocument:
         payload = callback_document.model_dump(exclude_none=True)
         try:
-            self._collection().document(callback_document.callback_id).set(payload)
+            self._collection().document(callback_document.callback_id).set(
+                payload,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -40,7 +43,9 @@ class CallbackRepository:
 
     def get_callback(self, callback_id: str) -> CallbackDocument:
         try:
-            snapshot = self._collection().document(callback_id).get()
+            snapshot = self._collection().document(callback_id).get(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             if not snapshot.exists:
                 raise AppError(
                     status_code=404,
@@ -72,7 +77,7 @@ class CallbackRepository:
     ) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
         try:
-            snapshots = self._collection().stream()
+            snapshots = self._collection().stream(timeout=self.firestore_service.operation_timeout_seconds)
             raw_items = []
             for snapshot in snapshots:
                 payload = snapshot.to_dict() or {}
@@ -115,7 +120,9 @@ class CallbackRepository:
     def list_callbacks_by_phone(self, phone: str) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
         try:
-            snapshots = self._collection().where("phone", "==", phone).stream()
+            snapshots = self._collection().where("phone", "==", phone).stream(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             for snapshot in snapshots:
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("callback_id", snapshot.id)
@@ -140,7 +147,9 @@ class CallbackRepository:
 
     def get_callback_by_origin_call(self, call_id: str) -> CallbackDocument | None:
         try:
-            snapshots = self._collection().where("call_id", "==", call_id).limit(1).stream()
+            snapshots = self._collection().where("call_id", "==", call_id).limit(1).stream(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             snapshot = next(snapshots, None)
             if snapshot is None:
                 return None
@@ -164,7 +173,11 @@ class CallbackRepository:
         updates = {**updates, "updated_at": utc_now()}
         try:
             self.get_callback(callback_id)
-            self._collection().document(callback_id).set(updates, merge=True)
+            self._collection().document(callback_id).set(
+                updates,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -179,6 +192,7 @@ class CallbackRepository:
                     "event_log": firestore.ArrayUnion([event]),
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -188,7 +202,7 @@ class CallbackRepository:
 
     def delete_callback(self, callback_id: str) -> None:
         try:
-            self._collection().document(callback_id).delete()
+            self._collection().document(callback_id).delete(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise

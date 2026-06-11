@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     firebase_private_key: SecretStr | None = Field(default=None, alias="FIREBASE_PRIVATE_KEY")
     firebase_client_email: str | None = Field(default=None, alias="FIREBASE_CLIENT_EMAIL")
     firebase_enabled: bool = Field(default=False, alias="FIREBASE_ENABLED")
+    firestore_operation_timeout_seconds: int = Field(default=3, alias="FIRESTORE_OPERATION_TIMEOUT_SECONDS")
     mongodb_fallback_enabled: bool = Field(default=True, alias="MONGODB_FALLBACK_ENABLED")
     mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
     mongodb_database: str | None = Field(default=None, alias="MONGODB_DATABASE")
@@ -191,6 +192,8 @@ class Settings(BaseSettings):
             raise ValueError("PUBLIC_TUNNEL_HEALTH_TIMEOUT_SECONDS must be at least 2 seconds.")
         if self.cloudflared_protocol.strip().lower() not in {"http2", "quic"}:
             raise ValueError("CLOUDFLARED_PROTOCOL must be either 'http2' or 'quic'.")
+        if self.firestore_operation_timeout_seconds < 1:
+            raise ValueError("FIRESTORE_OPERATION_TIMEOUT_SECONDS must be at least 1.")
         try:
             ZoneInfo(self.callback_default_timezone)
         except Exception as exc:

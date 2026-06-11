@@ -24,6 +24,10 @@ class FirestoreService:
     def is_configured(self) -> bool:
         return self.settings.has_firebase_config
 
+    @property
+    def operation_timeout_seconds(self) -> int:
+        return self.settings.firestore_operation_timeout_seconds
+
     def initialize(self):
         if not self.is_configured:
             return None

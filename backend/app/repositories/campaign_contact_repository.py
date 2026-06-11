@@ -41,7 +41,7 @@ class CampaignContactRepository:
                 for contact_document in chunk:
                     reference = collection.document(contact_document.contact_id)
                     batch.set(reference, contact_document.model_dump(exclude_none=True))
-                batch.commit()
+                batch.commit(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -56,7 +56,9 @@ class CampaignContactRepository:
 
     def get_contact(self, contact_id: str) -> CampaignContactDocument:
         try:
-            snapshot = self._collection().document(contact_id).get()
+            snapshot = self._collection().document(contact_id).get(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             if not snapshot.exists:
                 raise AppError(
                     status_code=404,
@@ -81,7 +83,9 @@ class CampaignContactRepository:
     def list_contacts_by_campaign(self, campaign_id: str) -> list[CampaignContactDocument]:
         contacts: list[CampaignContactDocument] = []
         try:
-            snapshots = self._collection().where("campaign_id", "==", campaign_id).stream()
+            snapshots = self._collection().where("campaign_id", "==", campaign_id).stream(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             for snapshot in snapshots:
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("contact_id", snapshot.id)
@@ -103,7 +107,11 @@ class CampaignContactRepository:
         updates = {**updates, "updated_at": utc_now()}
         try:
             self.get_contact(contact_id)
-            self._collection().document(contact_id).set(updates, merge=True)
+            self._collection().document(contact_id).set(
+                updates,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -126,7 +134,7 @@ class CampaignContactRepository:
                     reference = collection.document(contact_id)
                     payload = {**updates_by_contact_id[contact_id], "updated_at": utc_now()}
                     batch.set(reference, payload, merge=True)
-                batch.commit()
+                batch.commit(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -147,6 +155,7 @@ class CampaignContactRepository:
                     "event_log": firestore.ArrayUnion([event]),
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -167,7 +176,7 @@ class CampaignContactRepository:
                 chunk = contacts[index : index + self._batch_size]
                 for contact in chunk:
                     batch.delete(collection.document(contact.contact_id))
-                batch.commit()
+                batch.commit(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise

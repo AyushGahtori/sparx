@@ -1,5 +1,6 @@
 import asyncio
 from functools import lru_cache
+import time
 
 from starlette.concurrency import run_in_threadpool
 
@@ -38,6 +39,7 @@ class PostCallIntelligenceRunnerService:
         self._last_cycle_completed_at: str | None = None
         self._last_error: str | None = None
         self._recovered_jobs = 0
+        self._datastore_backoff_until = 0.0
 
     async def start(self) -> None:
         if self._loop_task and not self._loop_task.done():
@@ -46,8 +48,8 @@ class PostCallIntelligenceRunnerService:
         try:
             await self._recover_incomplete_jobs()
         except AppError as exc:
-            if exc.code != "firestore_not_configured":
-                raise
+            self._last_error = exc.message
+            logger.warning("Skipping AI recovery on startup due to datastore error: %s", exc.message)
         except Exception as exc:
             # Firestore transient failures (for example quota exhaustion) should not block API startup.
             self._last_error = str(exc)
@@ -109,6 +111,9 @@ class PostCallIntelligenceRunnerService:
         while not self._stop_event.is_set():
             try:
                 self._last_cycle_started_at = utc_now_iso()
+                if time.monotonic() < self._datastore_backoff_until:
+                    await asyncio.sleep(min(60, self._datastore_backoff_until - time.monotonic()))
+                    continue
                 await self._dispatch_queued_calls()
                 self._last_cycle_completed_at = utc_now_iso()
                 self._last_error = None
@@ -131,9 +136,10 @@ class PostCallIntelligenceRunnerService:
         try:
             calls = await run_in_threadpool(self.call_repository.list_calls)
         except AppError as exc:
-            if exc.code == "firestore_not_configured":
-                return
-            raise
+            self._last_error = exc.message
+            self._datastore_backoff_until = time.monotonic() + 300
+            logger.warning("Skipping AI queue dispatch cycle due to datastore error: %s", exc.message)
+            return
         except Exception as exc:
             self._last_error = str(exc)
             logger.warning("Skipping AI queue dispatch cycle due to datastore error: %s", exc)
@@ -216,8 +222,10 @@ class PostCallIntelligenceRunnerService:
     async def _recover_incomplete_jobs(self) -> None:
         try:
             calls = await run_in_threadpool(self.call_repository.list_calls)
-        except AppError:
-            raise
+        except AppError as exc:
+            self._last_error = exc.message
+            logger.warning("Unable to recover AI jobs during startup due to datastore error: %s", exc.message)
+            return
         except Exception as exc:
             self._last_error = str(exc)
             logger.warning("Unable to recover AI jobs during startup due to datastore error: %s", exc)

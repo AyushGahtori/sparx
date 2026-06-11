@@ -25,3 +25,6 @@ ngrok.exe
 .ngrok.exe.old
 tools/cloudflared.exe
 tools/cloudflared.*.log
+tools/mongodb/
+backend/.mongodb-data/
+backend/.local_fallback/

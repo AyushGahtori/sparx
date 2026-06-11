@@ -48,7 +48,7 @@ class PublicTunnelService:
     def ensure_public_url_ready_for_call(self) -> None:
         if not self.settings.has_public_base_url:
             if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled:
-                self.ensure_started_for_local_development()
+                self.ensure_started_for_local_development(wait_until_reachable=True)
             else:
                 raise AppError(
                     status_code=400,
@@ -56,13 +56,14 @@ class PublicTunnelService:
                     message="PUBLIC_BASE_URL must be configured so Twilio can reach the backend status webhooks and media stream bridge.",
                 )
 
-        if self._has_active_quick_tunnel():
+        if self._has_active_quick_tunnel() and self.is_public_base_url_reachable():
             return
 
         if not self.is_public_base_url_reachable():
             if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
-                self.ensure_started_for_local_development()
-                return
+                self.ensure_started_for_local_development(wait_until_reachable=True)
+                if self.is_public_base_url_reachable():
+                    return
 
         if not self.is_public_base_url_reachable():
             raise AppError(

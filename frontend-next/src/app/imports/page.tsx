@@ -1,9 +1,9 @@
-import { DashboardPage } from "@/components/pages";
+import { ImportsPage } from "@/components/pages";
 import { loadInitialPlatformData } from "@/lib/server-data";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function Page() {
   const initialData = await loadInitialPlatformData();
-  return <DashboardPage initialData={initialData} />;
+  return <ImportsPage initialData={initialData} />;
 }

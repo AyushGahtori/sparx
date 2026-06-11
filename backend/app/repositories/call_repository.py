@@ -8,6 +8,7 @@ from app.database.fallback_utils import should_use_mongo_fallback
 from app.database.firestore import FirestoreService, get_firestore_service
 from app.database.mongo_fallback import MongoFallbackService, get_mongo_fallback_service
 from app.models.firestore_documents import CallDocument
+from app.services.realtime_event_service import get_realtime_event_service
 from app.utils.time import coerce_utc, utc_now
 
 
@@ -31,16 +32,23 @@ class CallRepository:
     def create_call(self, call_document: CallDocument) -> CallDocument:
         payload = call_document.model_dump(exclude_none=True)
         try:
-            self._collection().document(call_document.call_id).set(payload)
+            self._collection().document(call_document.call_id).set(
+                payload,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
         self.mongo_fallback_service.upsert(self.collection_name, call_document.call_id, payload)
-        return self.get_call(call_document.call_id)
+        created_call = self.get_call(call_document.call_id)
+        self._publish_call("upsert", created_call)
+        return created_call
 
     def get_call(self, call_id: str) -> CallDocument:
         try:
-            snapshot = self._collection().document(call_id).get()
+            snapshot = self._collection().document(call_id).get(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             if not snapshot.exists:
                 raise AppError(
                     status_code=404,
@@ -65,17 +73,23 @@ class CallRepository:
         updates = {**updates, "updated_at": utc_now()}
         try:
             self.get_call(call_id)
-            self._collection().document(call_id).set(updates, merge=True)
+            self._collection().document(call_id).set(
+                updates,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
         self.mongo_fallback_service.upsert(self.collection_name, call_id, updates)
-        return self.get_call(call_id)
+        updated_call = self.get_call(call_id)
+        self._publish_call("upsert", updated_call)
+        return updated_call
 
     def list_calls(self) -> list[CallDocument]:
         calls: list[CallDocument] = []
         try:
-            for snapshot in self._collection().stream():
+            for snapshot in self._collection().stream(timeout=self.firestore_service.operation_timeout_seconds):
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("call_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
@@ -84,7 +98,8 @@ class CallRepository:
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            for payload in self.mongo_fallback_service.list(self.collection_name):
+            fallback_payloads = self.mongo_fallback_service.list(self.collection_name)
+            for payload in fallback_payloads:
                 payload.setdefault("call_id", payload.get("_id"))
                 payload.setdefault("id", payload.get("_id"))
                 calls.append(CallDocument.model_validate(payload))
@@ -99,7 +114,7 @@ class CallRepository:
                 self._collection()
                 .where("phone", "==", phone)
                 .where("call_type", "==", "individual")
-                .stream()
+                .stream(timeout=self.firestore_service.operation_timeout_seconds)
             )
             payloads = []
             for snapshot in candidates:
@@ -139,6 +154,7 @@ class CallRepository:
                     "event_log": firestore.ArrayUnion([event]),
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -155,6 +171,7 @@ class CallRepository:
                     "transcript": firestore.ArrayUnion([transcript_entry]),
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -165,7 +182,9 @@ class CallRepository:
             call_id,
             {"updated_at": utc_now(), "transcript_ingested_at": utc_now()},
         )
-        return self.get_call(call_id)
+        updated_call = self.get_call(call_id)
+        self._publish_call("upsert", updated_call)
+        return updated_call
 
     def replace_transcript(self, call_id: str, transcript: list[dict[str, Any]]) -> CallDocument:
         try:
@@ -176,6 +195,7 @@ class CallRepository:
                     "transcript": transcript,
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -185,15 +205,22 @@ class CallRepository:
             call_id,
             {"updated_at": utc_now(), "transcript_ingested_at": utc_now(), "transcript": transcript},
         )
-        return self.get_call(call_id)
+        updated_call = self.get_call(call_id)
+        self._publish_call("upsert", updated_call)
+        return updated_call
 
     def delete_call(self, call_id: str) -> None:
         try:
-            self._collection().document(call_id).delete()
+            self._collection().document(call_id).delete(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
         self.mongo_fallback_service.delete(self.collection_name, call_id)
+        get_realtime_event_service().publish(
+            "call.deleted",
+            "delete",
+            {"collection": self.collection_name, "id": call_id, "call_id": call_id},
+        )
 
     def get_call_by_twilio_sid(self, twilio_call_sid: str) -> CallDocument | None:
         try:
@@ -201,7 +228,7 @@ class CallRepository:
                 self._collection()
                 .where("twilio_call_sid", "==", twilio_call_sid)
                 .limit(1)
-                .stream()
+                .stream(timeout=self.firestore_service.operation_timeout_seconds)
             )
             snapshot = next(documents, None)
             if snapshot is None:
@@ -244,6 +271,18 @@ class CallRepository:
         payload.setdefault("call_id", payload.get("call_id") or payload.get("_id"))
         payload.setdefault("id", payload.get("id") or payload.get("_id"))
         return CallDocument.model_validate(payload)
+
+    @staticmethod
+    def _publish_call(action: str, call_document: CallDocument) -> None:
+        get_realtime_event_service().publish(
+            "call.updated",
+            action,
+            {
+                "collection": "calls",
+                "id": call_document.call_id,
+                "record": call_document.model_dump(exclude_none=True),
+            },
+        )
 
 
 def get_call_repository() -> CallRepository:

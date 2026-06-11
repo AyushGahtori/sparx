@@ -1,6 +1,11 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import {
   AlertTriangle,
+  BarChart3,
   CalendarDays,
   CheckCircle2,
   Clock3,
@@ -20,13 +25,15 @@ import {
 import { cn } from "@/lib/cn";
 
 const navItems = [
-  { label: "Dashboard", icon: Grid2X2, active: true },
-  { label: "Import", icon: UsersRound },
-  { label: "Campaign", icon: RefreshCw },
-  { label: "Reschedule", icon: Clock3 },
-  { label: "Controls", icon: SlidersHorizontal },
-  { label: "Calls", icon: PhoneCall },
-  { label: "Meetings", icon: CalendarDays },
+  { label: "Dashboard", href: "/", icon: Grid2X2 },
+  { label: "Session Logs", href: "/logs", icon: PhoneCall },
+  { label: "Manual Call", href: "/manual-call", icon: PhoneCall },
+  { label: "Campaign", href: "/campaigns", icon: RefreshCw },
+  { label: "Reschedule", href: "/callbacks", icon: Clock3 },
+  { label: "Summaries", href: "/summaries", icon: BarChart3 },
+  { label: "Transcripts", href: "/transcripts", icon: FileText },
+  { label: "Meetings", href: "/meetings", icon: CalendarDays },
+  { label: "Import Queue", href: "/imports", icon: UsersRound },
 ] as const;
 
 type AppShellProps = {
@@ -35,38 +42,43 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   return (
-    <div className="min-h-screen bg-[var(--sparx-page)] p-2 text-[var(--sparx-ink)] sm:p-4 lg:p-6">
-      <div className="mx-auto flex min-h-[calc(100vh-1rem)] w-full max-w-[1420px] flex-col overflow-hidden rounded-[28px] bg-[var(--sparx-canvas)] shadow-[0_24px_70px_rgba(39,35,26,0.08)] sm:min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-3rem)] lg:flex-row">
-        <Sidebar />
-        <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-7 lg:py-8">
-          {children}
-        </main>
-      </div>
+    <div className="flex min-h-screen bg-[var(--sparx-canvas)] text-[var(--sparx-ink)]">
+      <Sidebar />
+      <main className="min-w-0 flex-1 overflow-auto px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+        {children}
+      </main>
     </div>
   );
 }
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
-    <aside className="flex shrink-0 items-center gap-3 overflow-x-auto border-b border-[var(--sparx-line)] bg-white/78 px-4 py-3 lg:w-[86px] lg:flex-col lg:overflow-visible lg:border-b-0 lg:border-r lg:px-3 lg:py-6">
-      <div className="grid size-12 shrink-0 place-items-center rounded-[8px] bg-[var(--sparx-brand-soft)] text-white shadow-sm">
-        <Sparkles className="size-8" strokeWidth={2.6} />
+    <aside className="sticky top-0 z-10 flex h-screen w-[64px] shrink-0 flex-col items-center border-r border-[var(--sparx-line)] bg-white px-2 py-4">
+      <div className="grid size-11 shrink-0 place-items-center rounded-[8px] bg-[var(--sparx-brand-soft)] text-white shadow-sm">
+        <Sparkles className="size-7" strokeWidth={2.6} />
       </div>
 
-      <nav className="flex items-center gap-2 lg:mt-4 lg:flex-col" aria-label="Primary">
+      <nav className="mt-6 flex flex-col items-center gap-2" aria-label="Primary">
         {navItems.map((item) => (
-          <IconButton
+          <Link
             key={item.label}
-            active={"active" in item ? item.active : false}
+            className={cn(
+              "grid size-10 shrink-0 place-items-center rounded-full text-[var(--sparx-muted)] transition hover:bg-[var(--sparx-panel)]",
+              (pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))) &&
+                "bg-[var(--sparx-night)] text-[var(--sparx-yellow)]",
+            )}
+            href={item.href}
             aria-label={item.label}
             title={item.label}
           >
             <item.icon className="size-5" />
-          </IconButton>
+          </Link>
         ))}
       </nav>
 
-      <div className="ml-auto flex items-center gap-2 lg:mt-auto lg:ml-0 lg:flex-col">
+      <div className="mt-auto flex flex-col items-center gap-3">
         <IconButton aria-label="Theme preview" title="Theme preview" variant="dark">
           <Moon className="size-5 text-[var(--sparx-yellow)]" />
         </IconButton>
@@ -89,15 +101,13 @@ export function GreetingHeader({
   subtitle = "Let's take a look at your activity today.",
 }: GreetingHeaderProps) {
   return (
-    <header className="mb-4 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center">
-      <div className="grid min-h-[70px] w-full max-w-[430px] content-center rounded-[8px] bg-[var(--sparx-panel)] px-5 py-4">
-        <h1 className="text-[22px] font-black leading-tight tracking-normal sm:text-[28px]">
-          Hi, {name} !
-        </h1>
-        <p className="mt-1 text-sm font-medium text-[var(--sparx-muted)]">
-          {subtitle}
-        </p>
-      </div>
+    <header className="mb-5 border-b border-[var(--sparx-line)] pb-4">
+      <h1 className="text-[24px] font-black leading-tight tracking-normal sm:text-[32px]">
+        Hi, {name} !
+      </h1>
+      <p className="mt-1 text-sm font-medium text-[var(--sparx-muted)] sm:text-base">
+        {subtitle}
+      </p>
     </header>
   );
 }
@@ -118,20 +128,15 @@ export function PageCanvas({
   className,
 }: PageCanvasProps) {
   return (
-    <section
-      className={cn(
-        "rounded-[26px] bg-[var(--sparx-panel)] p-4 sm:p-6 lg:p-8",
-        className,
-      )}
-    >
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section className={cn("min-w-0", className)}>
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           {eyebrow ? (
             <span className="text-xs font-black uppercase tracking-normal text-[var(--sparx-olive)]">
               {eyebrow}
             </span>
           ) : null}
-          <h2 className="mt-1 text-[38px] font-black leading-none tracking-normal text-black sm:text-[54px]">
+          <h2 className="mt-1 text-[34px] font-black leading-none tracking-normal text-black sm:text-[48px]">
             {title}
           </h2>
         </div>
@@ -144,7 +149,7 @@ export function PageCanvas({
 
 type StatCardProps = {
   label: string;
-  value: string;
+  value: string | number;
   caption?: string;
   tone?: "warm" | "olive" | "white";
   icon?: ReactNode;
@@ -179,7 +184,7 @@ export function StatCard({
         <span className="text-sm font-black leading-tight">{label}</span>
       </div>
       <div>
-        <strong className="block text-[56px] font-black leading-[0.88] tracking-normal">
+        <strong className="block text-[48px] font-black leading-[0.88] tracking-normal sm:text-[56px]">
           {value}
         </strong>
         {caption ? (
@@ -290,7 +295,7 @@ type FormFieldProps = {
 
 export function FormField({
   label,
-  placeholder = "May Renewal List",
+  placeholder = "",
   value,
   wide,
 }: FormFieldProps) {
@@ -321,6 +326,31 @@ export function UploadPanel() {
         <PrimaryButton className="mt-4 bg-white text-[var(--sparx-ink)] ring-1 ring-[var(--sparx-line)]">
           Select Renewal File
         </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+export function AssetFrame({
+  title,
+  description = "Image asset slot",
+  className,
+}: {
+  title: string;
+  description?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid min-h-[160px] place-items-center rounded-[8px] bg-[var(--sparx-card-strong)] p-5 text-center text-[var(--sparx-muted)]",
+        className,
+      )}
+    >
+      <div>
+        <Sparkles className="mx-auto size-8 text-white/80" />
+        <p className="mt-2 text-sm font-black text-[var(--sparx-ink)]">{title}</p>
+        <p className="mt-1 text-xs font-semibold">{description}</p>
       </div>
     </div>
   );
@@ -369,4 +399,6 @@ export const previewIcons = {
   success: <CheckCircle2 className="size-4" />,
   warning: <AlertTriangle className="size-4" />,
   settings: <Settings2 className="size-4" />,
+  upload: <UploadCloud className="size-4" />,
+  filters: <SlidersHorizontal className="size-4" />,
 };

@@ -30,7 +30,10 @@ class CampaignRepository:
     def create_campaign(self, campaign_document: CampaignDocument) -> CampaignDocument:
         payload = campaign_document.model_dump(exclude_none=True)
         try:
-            self._collection().document(campaign_document.campaign_id).set(payload)
+            self._collection().document(campaign_document.campaign_id).set(
+                payload,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -39,7 +42,9 @@ class CampaignRepository:
 
     def get_campaign(self, campaign_id: str) -> CampaignDocument:
         try:
-            snapshot = self._collection().document(campaign_id).get()
+            snapshot = self._collection().document(campaign_id).get(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             if not snapshot.exists:
                 raise AppError(
                     status_code=404,
@@ -64,7 +69,7 @@ class CampaignRepository:
     def list_campaigns(self) -> list[CampaignDocument]:
         campaigns: list[CampaignDocument] = []
         try:
-            for snapshot in self._collection().stream():
+            for snapshot in self._collection().stream(timeout=self.firestore_service.operation_timeout_seconds):
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("campaign_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
@@ -85,7 +90,11 @@ class CampaignRepository:
         updates = {**updates, "updated_at": utc_now()}
         try:
             self.get_campaign(campaign_id)
-            self._collection().document(campaign_id).set(updates, merge=True)
+            self._collection().document(campaign_id).set(
+                updates,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -100,6 +109,7 @@ class CampaignRepository:
                     "event_log": firestore.ArrayUnion([event]),
                 },
                 merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
             )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
@@ -109,7 +119,7 @@ class CampaignRepository:
 
     def delete_campaign(self, campaign_id: str) -> None:
         try:
-            self._collection().document(campaign_id).delete()
+            self._collection().document(campaign_id).delete(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise

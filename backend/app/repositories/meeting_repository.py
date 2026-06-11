@@ -29,7 +29,11 @@ class MeetingRepository:
     def upsert_meeting(self, meeting_document: MeetingDocument) -> MeetingDocument:
         payload = meeting_document.model_dump(exclude_none=True)
         try:
-            self._collection().document(meeting_document.meeting_id).set(payload, merge=True)
+            self._collection().document(meeting_document.meeting_id).set(
+                payload,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -38,7 +42,9 @@ class MeetingRepository:
 
     def get_meeting(self, meeting_id: str) -> MeetingDocument:
         try:
-            snapshot = self._collection().document(meeting_id).get()
+            snapshot = self._collection().document(meeting_id).get(
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
             if not snapshot.exists:
                 raise AppError(
                     status_code=404,
@@ -68,7 +74,7 @@ class MeetingRepository:
     ) -> list[MeetingDocument]:
         try:
             raw_items = []
-            for snapshot in self._collection().stream():
+            for snapshot in self._collection().stream(timeout=self.firestore_service.operation_timeout_seconds):
                 payload = snapshot.to_dict() or {}
                 payload.setdefault("meeting_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
@@ -100,7 +106,11 @@ class MeetingRepository:
         updates = {**updates, "updated_at": utc_now()}
         try:
             self.get_meeting(meeting_id)
-            self._collection().document(meeting_id).set(updates, merge=True)
+            self._collection().document(meeting_id).set(
+                updates,
+                merge=True,
+                timeout=self.firestore_service.operation_timeout_seconds,
+            )
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -109,7 +119,7 @@ class MeetingRepository:
 
     def delete_meeting(self, meeting_id: str) -> None:
         try:
-            self._collection().document(meeting_id).delete()
+            self._collection().document(meeting_id).delete(timeout=self.firestore_service.operation_timeout_seconds)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
