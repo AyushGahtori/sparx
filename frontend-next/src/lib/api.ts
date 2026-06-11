@@ -1,8 +1,8 @@
-const DEFAULT_API_BASE_URL = "/api/backend";
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api";
 
 export const apiConfig = {
   baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL,
-  timeoutMs: Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS ?? 20000),
+  timeoutMs: Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS ?? 120000),
 } as const;
 
 export async function apiRequest<T>(
@@ -10,7 +10,9 @@ export async function apiRequest<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), apiConfig.timeoutMs);
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException("Request timed out. The backend may still be starting the call.", "TimeoutError"));
+  }, apiConfig.timeoutMs);
 
   try {
     const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
@@ -40,6 +42,14 @@ export async function apiRequest<T>(
     }
 
     return payload?.success === true ? payload.data : payload;
+  } catch (error) {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new Error("The request timed out while waiting for the backend. Please refresh the call status before trying again.");
+    }
+    if (error instanceof Error && /aborted|abortsignal|signal is aborted/i.test(error.message)) {
+      throw new Error("The request was cancelled before the backend responded. Please refresh the call status before trying again.");
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

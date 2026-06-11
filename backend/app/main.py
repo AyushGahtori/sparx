@@ -63,7 +63,10 @@ async def startup_event() -> None:
 
     if twilio_service.is_configured:
         twilio_service.get_client()
-    public_tunnel_service.ensure_started_for_local_development(wait_until_reachable=False)
+    public_tunnel_service.ensure_started_for_local_development(
+        wait_until_reachable=False,
+        force_refresh=settings.has_twilio_config,
+    )
     if settings.has_twilio_config and not settings.has_public_base_url:
         logger.warning(
             "PUBLIC_BASE_URL is not configured. Outbound calls and validated webhooks will not work until a public HTTPS URL is configured."

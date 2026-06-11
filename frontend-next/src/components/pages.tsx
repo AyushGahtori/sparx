@@ -14,11 +14,13 @@ import {
   Folder,
   Phone,
   RefreshCw,
+  RotateCcw,
   Send,
   Sparkles,
   Trash2,
   Upload,
   User,
+  X,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -447,10 +449,10 @@ function SelectField({
   children: ReactNode;
 }) {
   return (
-    <label className="grid gap-1.5">
+    <label className="grid min-w-0 gap-1.5">
       <span className="text-sm font-black">{label}</span>
       <select
-        className="h-10 rounded-[6px] border border-[var(--sparx-line-strong)] bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--sparx-yellow)] focus:ring-2 focus:ring-[rgba(241,231,47,0.36)]"
+        className="h-10 w-full min-w-0 truncate rounded-[6px] border border-[var(--sparx-line-strong)] bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--sparx-yellow)] focus:ring-2 focus:ring-[rgba(241,231,47,0.36)]"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -603,7 +605,7 @@ export function LogsPage({ initialData }: PageDataProps) {
             Open any call in a dedicated transcript window without touching the live dashboard transcripts.
           </p>
           <DataNotice status={status} error={error} errors={data?.errors} />
-          <section className="mt-5 grid grid-cols-2 gap-5 md:grid-cols-4">
+          <section className="mt-5 grid max-w-[920px] grid-cols-2 gap-x-12 gap-y-5 md:grid-cols-4 md:gap-x-14">
             <MiniMetric value={calls.length} label="Total Sessions" />
             <MiniMetric value={calls.filter((call) => activeCallStatuses.has(call.status)).length} label="Live now" />
             <MiniMetric value={calls.filter((call) => completedCallStatuses.has(call.status)).length} label="Completed Calls" />
@@ -742,72 +744,74 @@ export function CampaignPage({ initialData }: PageDataProps) {
     <AppShell>
       <GreetingHeader />
       <PageFrame>
-        <PageCanvas title="Campaign">
-          <DataNotice status={status} error={error} errors={data?.errors} />
-          <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <form className="sparx-grid rounded-[8px] bg-white/70 p-4" onSubmit={handleSubmit}>
-              <h3 className="mb-4 text-lg font-black">Agent Setup</h3>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Campaign" value={form.campaign_name} onChange={(value) => updateForm("campaign_name", value)} required />
-                <SelectField label="Agent Name" value={selectedAgentId} onChange={(value) => updateForm("agent_id", value)}>
-                  {agents.length ? agents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.agent_name}</option>) : <option value="">No agents loaded</option>}
-                </SelectField>
-                <Field label="Campaign Type" value={form.campaign_type} onChange={(value) => updateForm("campaign_type", value)} required />
-                <Field label="Language" value={form.language} onChange={(value) => updateForm("language", value)} required />
-                <Field label="Call Objective" value={form.call_objective} onChange={(value) => updateForm("call_objective", value)} required />
-                <Field label="Product Name" value={form.product_name} onChange={(value) => updateForm("product_name", value)} />
-                <Field label="Product Description" value={form.product_description} onChange={(value) => updateForm("product_description", value)} required />
-                <SelectField label="Dispatch" value={form.dispatch_mode} onChange={(value) => updateForm("dispatch_mode", value as CampaignFormState["dispatch_mode"])}>
-                  <option value="parallel">All counted customers</option>
-                  <option value="one_by_one">One by one</option>
-                </SelectField>
-              </div>
-              <div className="mt-4 rounded-[8px] border border-dashed border-[var(--sparx-line-strong)] bg-white p-4">
-                <label className="grid gap-2 text-sm font-black">
-                  Renewal Sheet Import
-                  <input accept=".csv,.xlsx,.xls,.pdf,.doc,.docx,.txt" disabled={busy} onChange={handleFile} type="file" />
-                </label>
-              </div>
-              {message ? <p className="mt-3 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
-              <div className="mt-4 flex flex-wrap gap-2">
-                <PrimaryButton disabled={busy || !preview?.contacts.length || !selectedAgentId} type="submit">Create Campaign</PrimaryButton>
-                <PrimaryButton onClick={refresh} type="button" variant="soft">Refresh</PrimaryButton>
-              </div>
-            </form>
-            <div className="grid gap-4">
-              <AssetFrame title="Campaign visual asset" description="Frame reserved for exported Figma image." />
-              <div className="rounded-[8px] bg-[var(--sparx-card-strong)] p-4">
-                <h3 className="text-lg font-black">Renewal Sheet Import</h3>
-                {preview ? (
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <MiniMetric value={preview.valid_contacts} label="Valid" />
-                    <MiniMetric value={preview.invalid_contacts} label="Invalid" />
-                    <MiniMetric value={preview.duplicate_contacts} label="Duplicate" />
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm font-semibold text-[var(--sparx-muted)]">Upload a file to show backend validation results.</p>
-                )}
+        <section className="rounded-[36px] bg-[#F5F2EE] p-5 sm:p-7 lg:p-9">
+          <PageCanvas title="Campaign">
+            <DataNotice status={status} error={error} errors={data?.errors} />
+            <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <form className="sparx-grid rounded-[8px] bg-white/70 p-4" onSubmit={handleSubmit}>
+                <h3 className="mb-4 text-lg font-black">Agent Setup</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Campaign" value={form.campaign_name} onChange={(value) => updateForm("campaign_name", value)} required />
+                  <SelectField label="Agent Name" value={selectedAgentId} onChange={(value) => updateForm("agent_id", value)}>
+                    {agents.length ? agents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.agent_name}</option>) : <option value="">No agents loaded</option>}
+                  </SelectField>
+                  <Field label="Campaign Type" value={form.campaign_type} onChange={(value) => updateForm("campaign_type", value)} required />
+                  <Field label="Language" value={form.language} onChange={(value) => updateForm("language", value)} required />
+                  <Field label="Call Objective" value={form.call_objective} onChange={(value) => updateForm("call_objective", value)} required />
+                  <Field label="Product Name" value={form.product_name} onChange={(value) => updateForm("product_name", value)} />
+                  <Field label="Product Description" value={form.product_description} onChange={(value) => updateForm("product_description", value)} required />
+                  <SelectField label="Dispatch" value={form.dispatch_mode} onChange={(value) => updateForm("dispatch_mode", value as CampaignFormState["dispatch_mode"])}>
+                    <option value="parallel">All counted customers</option>
+                    <option value="one_by_one">One by one</option>
+                  </SelectField>
+                </div>
+                <div className="mt-4 rounded-[8px] border border-dashed border-[var(--sparx-line-strong)] bg-white p-4">
+                  <label className="grid gap-2 text-sm font-black">
+                    Renewal Sheet Import
+                    <input accept=".csv,.xlsx,.xls,.pdf,.doc,.docx,.txt" disabled={busy} onChange={handleFile} type="file" />
+                  </label>
+                </div>
+                {message ? <p className="mt-3 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <PrimaryButton disabled={busy || !preview?.contacts.length || !selectedAgentId} type="submit">Create Campaign</PrimaryButton>
+                  <PrimaryButton onClick={refresh} type="button" variant="soft">Refresh</PrimaryButton>
+                </div>
+              </form>
+              <div className="grid gap-4">
+                <AssetFrame title="Campaign visual asset" description="Frame reserved for exported Figma image." />
+                <div className="rounded-[8px] bg-[var(--sparx-card-strong)] p-4">
+                  <h3 className="text-lg font-black">Renewal Sheet Import</h3>
+                  {preview ? (
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <MiniMetric value={preview.valid_contacts} label="Valid" />
+                      <MiniMetric value={preview.invalid_contacts} label="Invalid" />
+                      <MiniMetric value={preview.duplicate_contacts} label="Duplicate" />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm font-semibold text-[var(--sparx-muted)]">Upload a file to show backend validation results.</p>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-          <section className="mt-5">
-            <h3 className="mb-3 text-xl font-black">Campaign Records</h3>
-            {campaigns.length ? (
-              <div className="grid gap-3">
-                {campaigns.map((campaign) => (
-                  <article key={campaign.campaign_id} className="flex flex-col gap-3 rounded-[8px] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <StatusBadge tone={campaign.status === "running" ? "active" : "neutral"}>{humanize(campaign.status)}</StatusBadge>
-                      <h4 className="mt-2 text-xl font-black">{campaign.campaign_name}</h4>
-                      <p className="text-sm font-semibold text-[var(--sparx-muted)]">{campaign.completed_calls}/{campaign.total_contacts} completed | {campaign.agent_name}</p>
-                    </div>
-                    <PrimaryButton onClick={() => services.startCampaign(campaign.campaign_id).then(refresh)} variant="soft">Start</PrimaryButton>
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyState title="No campaigns yet" description="Created backend campaigns will appear here." />}
-          </section>
-        </PageCanvas>
+          </PageCanvas>
+        </section>
+        <section className="mt-5">
+          <h3 className="mb-3 text-xl font-black">Campaign Records</h3>
+          {campaigns.length ? (
+            <div className="grid gap-3">
+              {campaigns.map((campaign) => (
+                <article key={campaign.campaign_id} className="flex flex-col gap-3 rounded-[8px] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <StatusBadge tone={campaign.status === "running" ? "active" : "neutral"}>{humanize(campaign.status)}</StatusBadge>
+                    <h4 className="mt-2 text-xl font-black">{campaign.campaign_name}</h4>
+                    <p className="text-sm font-semibold text-[var(--sparx-muted)]">{campaign.completed_calls}/{campaign.total_contacts} completed | {campaign.agent_name}</p>
+                  </div>
+                  <PrimaryButton onClick={() => services.startCampaign(campaign.campaign_id).then(refresh)} variant="soft">Start</PrimaryButton>
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState title="No campaigns yet" description="Created backend campaigns will appear here." />}
+        </section>
       </PageFrame>
     </AppShell>
   );
@@ -998,6 +1002,7 @@ export function ManualCallPage({ initialData }: PageDataProps) {
       setActiveCall(call);
       setMessage(`Call ${call.call_id} was created and sent to Twilio.`);
       setMessageTone("active");
+      void refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to start the call.");
       setMessageTone("danger");
@@ -1645,86 +1650,108 @@ export function CallbacksPage({ initialData }: PageDataProps) {
     }
   }
 
+  function toggleCallbackSchedule(callback: CallbackRecord) {
+    const isCancelled = callback.status === "cancelled";
+    const nextStatus = isCancelled ? "scheduled" : "cancelled";
+    const success = isCancelled ? "Callback rescheduled." : "Callback cancelled.";
+    return runAction(services.updateCallback(callback.callback_id, { status: nextStatus }), success);
+  }
+
   return (
     <AppShell>
       <GreetingHeader />
       <PageFrame>
-        <PageCanvas title="Reschedule">
-          <DataNotice status={status} error={error} errors={data?.errors} />
-          {message ? <p className="mt-2 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
-          <section className="mt-4 grid grid-cols-2 gap-5 md:grid-cols-4">
-            <MiniMetric value={openCallbacks.length} label="Scheduled" />
-            <MiniMetric value={dueToday.length} label="Due Today" />
-            <MiniMetric value={overdue.length} label="Overdue" />
-            <MiniMetric value={completed.length} label="Completed" />
-          </section>
-          {latest ? (
-            <section className="mt-5 rounded-[8px] bg-[var(--sparx-olive)] p-4 text-white">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-sm font-black text-[var(--sparx-yellow)]">Latest Upcoming</p>
-                  <h3 className="text-2xl font-black">{latest.lead_name}</h3>
-                  <p className="text-sm font-semibold text-white/70">{formatDateTime(latest.normalized_callback_time)} | {latest.phone}</p>
-                  <p className="mt-3 text-sm font-medium text-white/70">{shortText(latest.callback_reason)}</p>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <PrimaryButton icon={<Phone className="size-4" />} onClick={() => void runAction(services.executeCallback(latest.callback_id), "Callback execution queued.")} variant="soft">
-                    Dial
-                  </PrimaryButton>
-                  <PrimaryButton icon={<CheckCircle2 className="size-4" />} onClick={() => void runAction(services.updateCallback(latest.callback_id, { status: "completed" }), "Callback marked completed.")} variant="soft">
-                    Done
-                  </PrimaryButton>
-                </div>
-              </div>
+        <section className="rounded-[36px] bg-[#F5F2EE] p-5 sm:p-7 lg:p-9">
+          <PageCanvas title="Reschedule">
+            <DataNotice status={status} error={error} errors={data?.errors} />
+            {message ? <p className="mt-2 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
+            <section className="mt-4 grid max-w-[920px] grid-cols-2 gap-x-12 gap-y-5 md:grid-cols-4 md:gap-x-14">
+              <MiniMetric value={openCallbacks.length} label="Scheduled" />
+              <MiniMetric value={dueToday.length} label="Due Today" />
+              <MiniMetric value={overdue.length} label="Overdue" />
+              <MiniMetric value={completed.length} label="Completed" />
             </section>
-          ) : null}
-          <section className="mt-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-xl font-black">Rescheduled Calls</h3>
-              <span className="text-sm font-bold text-[var(--sparx-muted)]">{callbacks.length} Records</span>
-            </div>
-            {callbacks.length ? (
-              <ScrollPanel className="max-h-[420px] bg-transparent p-0">
-                <div className="grid gap-3">
-                  {upcomingCallbacks(callbacks).map((callback) => (
-                    <article className="grid gap-3 rounded-[8px] bg-white p-3 lg:grid-cols-[minmax(180px,320px)_minmax(0,1fr)_auto]" key={callback.callback_id}>
-                      <div className="flex min-w-0 gap-3">
-                        <AvatarFrame label={callback.lead_name} />
-                        <div className="min-w-0">
-                          <StatusBadge tone={statusTone(callback.status)}>{humanize(callback.status)}</StatusBadge>
-                          <h4 className="truncate text-xl font-black">{callback.lead_name}</h4>
-                          <p className="text-xs font-semibold text-[var(--sparx-muted)]">{formatDateTime(callback.normalized_callback_time)} | {callback.phone}</p>
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <h5 className="font-black">{shortText(callback.callback_reason)}</h5>
-                        <p className="text-xs font-semibold text-[var(--sparx-muted)]">{shortText(callback.next_action || callback.notes)}</p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <PrimaryButton icon={<Phone className="size-4" />} onClick={() => void runAction(services.executeCallback(callback.callback_id), "Callback execution queued.")}>
-                          Dial
-                        </PrimaryButton>
-                        <PrimaryButton icon={<CheckCircle2 className="size-4" />} onClick={() => void runAction(services.updateCallback(callback.callback_id, { status: "completed" }), "Callback marked completed.")} variant="soft">
-                          Done
-                        </PrimaryButton>
-                        <button className="grid size-8 place-items-center rounded-full text-[var(--sparx-red)]" onClick={() => void runAction(services.updateCallback(callback.callback_id, { status: "cancelled" }), "Callback cancelled.")} type="button">
-                          <AlertCircle className="size-5" />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+            {latest ? (
+              <section className="mt-5 rounded-[8px] bg-[var(--sparx-olive)] p-4 text-white">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-[var(--sparx-yellow)]">Latest Upcoming</p>
+                    <h3 className="text-2xl font-black">{latest.lead_name}</h3>
+                    <p className="text-sm font-semibold text-white/70">{formatDateTime(latest.normalized_callback_time)} | {latest.phone}</p>
+                    <p className="mt-3 text-sm font-medium text-white/70">{shortText(latest.callback_reason)}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <PrimaryButton icon={<Phone className="size-4" />} onClick={() => void runAction(services.executeCallback(latest.callback_id), "Callback execution queued.")} variant="soft">
+                      Dial
+                    </PrimaryButton>
+                    <PrimaryButton icon={<CheckCircle2 className="size-4" />} onClick={() => void runAction(services.updateCallback(latest.callback_id, { status: "completed" }), "Callback marked completed.")} variant="soft">
+                      Done
+                    </PrimaryButton>
+                  </div>
                 </div>
-              </ScrollPanel>
-            ) : (
-              <EmptyState title="No rescheduled calls" description="Backend callback records will appear here after callers ask for a later time." />
-            )}
-          </section>
-        </PageCanvas>
+              </section>
+            ) : null}
+            <section className="mt-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-xl font-black">Rescheduled Calls</h3>
+                <span className="text-sm font-bold text-[var(--sparx-muted)]">{callbacks.length} Records</span>
+              </div>
+              {callbacks.length ? (
+                <ScrollPanel className="max-h-[420px] bg-transparent p-0">
+                  <div className="grid gap-3">
+                    {upcomingCallbacks(callbacks).map((callback) => {
+                      const isCancelled = callback.status === "cancelled";
+                      return (
+                        <article className="grid gap-3 rounded-[8px] bg-white p-3 lg:grid-cols-[minmax(180px,320px)_minmax(0,1fr)_auto]" key={callback.callback_id}>
+                          <div className="flex min-w-0 gap-3">
+                            <AvatarFrame label={callback.lead_name} />
+                            <div className="min-w-0">
+                              <StatusBadge tone={statusTone(callback.status)}>{humanize(callback.status)}</StatusBadge>
+                              <h4 className="truncate text-xl font-black">{callback.lead_name}</h4>
+                              <p className="text-xs font-semibold text-[var(--sparx-muted)]">{formatDateTime(callback.normalized_callback_time)} | {callback.phone}</p>
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <h5 className="font-black">{shortText(callback.callback_reason)}</h5>
+                            <p className="text-xs font-semibold text-[var(--sparx-muted)]">{shortText(callback.next_action || callback.notes)}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <PrimaryButton disabled={isCancelled} icon={<Phone className="size-4" />} onClick={() => void runAction(services.executeCallback(callback.callback_id), "Callback execution queued.")}>
+                              Dial
+                            </PrimaryButton>
+                            <PrimaryButton disabled={isCancelled} icon={<CheckCircle2 className="size-4" />} onClick={() => void runAction(services.updateCallback(callback.callback_id, { status: "completed" }), "Callback marked completed.")} variant="soft">
+                              Done
+                            </PrimaryButton>
+                            <button
+                              aria-label={isCancelled ? "Reschedule callback" : "Cancel callback"}
+                              className={cn(
+                                "grid size-8 place-items-center rounded-full border bg-white",
+                                isCancelled
+                                  ? "border-[var(--sparx-olive)] text-[var(--sparx-olive)]"
+                                  : "border-[var(--sparx-red)] text-[var(--sparx-red)]",
+                              )}
+                              onClick={() => void toggleCallbackSchedule(callback)}
+                              title={isCancelled ? "Reschedule" : "Cancel"}
+                              type="button"
+                            >
+                              {isCancelled ? <RotateCcw className="size-4" /> : <X className="size-4" />}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </ScrollPanel>
+              ) : (
+                <EmptyState title="No rescheduled calls" description="Backend callback records will appear here after callers ask for a later time." />
+              )}
+            </section>
+          </PageCanvas>
+        </section>
       </PageFrame>
     </AppShell>
   );
 }
-
 function meetingTimeBounds(meeting: MeetingRecord) {
   const start = formatTime(meeting.scheduled_for);
   const end = formatTime(meeting.ends_at);
@@ -1912,9 +1939,11 @@ export function ImportsPage({ initialData }: PageDataProps) {
             <div className="rounded-[8px] bg-[linear-gradient(135deg,#6f5200,#2b1b0d)] p-5 text-white">
               <div className="grid gap-5 sm:grid-cols-[140px_1fr] sm:items-center">
                 <div className="grid size-36 place-items-center rounded-full" style={{ background: conic }}>
-                  <div className="grid size-24 place-items-center rounded-full bg-[var(--sparx-olive)] text-center">
-                    <strong className="text-3xl font-black">{formatNumber(totalImported)}</strong>
-                    <span className="text-xs font-semibold">Total Imported</span>
+                  <div className="grid size-[7.5rem] place-items-center rounded-full bg-[var(--sparx-olive)] text-center">
+                    <div className="-translate-y-2">
+                      <strong className="block text-3xl font-black leading-none">{formatNumber(totalImported)}</strong>
+                      <span className="mt-2 block text-xs font-semibold leading-tight">Total Imported</span>
+                    </div>
                   </div>
                 </div>
                 <div className="grid gap-3 text-sm font-bold">

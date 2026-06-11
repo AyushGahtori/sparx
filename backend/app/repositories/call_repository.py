@@ -139,7 +139,7 @@ class CallRepository:
                 continue
             if coerce_utc(call_document.created_at or utc_now()) < cutoff:
                 continue
-            if call_document.status in {"completed", "failed", "busy", "no_answer"}:
+            if call_document.status not in {"initiated", "ringing", "answered", "in_progress"}:
                 continue
             duplicate_candidates.append(call_document)
 
