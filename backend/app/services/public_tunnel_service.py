@@ -25,17 +25,22 @@ class PublicTunnelService:
         self.stderr_log_path = self.settings.logs_dir / "cloudflared.err.log"
         self.stdout_log_path = self.settings.logs_dir / "cloudflared.out.log"
 
-    def ensure_started_for_local_development(self, *, wait_until_reachable: bool = False) -> str | None:
+    def ensure_started_for_local_development(
+        self,
+        *,
+        wait_until_reachable: bool = False,
+        force_refresh: bool = False,
+    ) -> str | None:
         if self.settings.environment != "local" or not self.settings.auto_public_tunnel_enabled:
             return self.settings.normalized_public_base_url
 
         if self.settings.normalized_public_base_url and not self.settings.uses_cloudflare_quick_tunnel:
             return self.settings.normalized_public_base_url
 
-        if self._has_active_quick_tunnel():
+        if self._has_active_quick_tunnel() and not force_refresh:
             return self.settings.normalized_public_base_url
 
-        if self.settings.normalized_public_base_url and self.is_public_base_url_reachable():
+        if self.settings.normalized_public_base_url and not force_refresh and self.is_public_base_url_reachable():
             return self.settings.normalized_public_base_url
 
         tunnel_url = self._start_cloudflared_quick_tunnel(wait_until_reachable=wait_until_reachable)
@@ -81,7 +86,10 @@ class PublicTunnelService:
         if not base_url:
             return False
         try:
-            request = Request(f"{base_url}{self.settings.api_v1_prefix}/health", method="GET")
+            # Use the lightweight root endpoint here. /api/health checks external
+            # dependencies such as Firestore, so a database outage can falsely
+            # make an otherwise valid Twilio tunnel look unreachable.
+            request = Request(f"{base_url}/", method="GET")
             with urlopen(request, timeout=self.settings.public_tunnel_health_timeout_seconds) as response:
                 return 200 <= response.status < 300
         except (OSError, URLError, TimeoutError, ValueError):
@@ -100,6 +108,7 @@ class PublicTunnelService:
             )
 
         self._stop_managed_process()
+        self._stop_existing_quick_tunnels()
         self.stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.stderr_log_path.write_text("", encoding="utf-8")
         self.stdout_log_path.write_text("", encoding="utf-8")
@@ -196,6 +205,32 @@ class PublicTunnelService:
             except subprocess.TimeoutExpired:
                 self.process.kill()
         self.active_tunnel_url = None
+
+    def _stop_existing_quick_tunnels(self) -> None:
+        executable = str(self.settings.cloudflared_executable_file).lower()
+        try:
+            import psutil
+        except Exception as exc:
+            logger.warning("Unable to inspect existing cloudflared processes: %s", exc)
+            return
+
+        for process in psutil.process_iter(["pid", "exe", "cmdline"]):
+            try:
+                exe = str(process.info.get("exe") or "").lower()
+                command = " ".join(process.info.get("cmdline") or []).lower()
+                if executable not in exe and "cloudflared" not in command:
+                    continue
+                if " tunnel " not in f" {command} " or "trycloudflare" in command:
+                    continue
+                if f"127.0.0.1:{self.settings.app_port}" not in command:
+                    continue
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    process.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
     def _has_active_quick_tunnel(self) -> bool:
         return bool(
