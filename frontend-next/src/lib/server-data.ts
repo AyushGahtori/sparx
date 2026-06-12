@@ -56,13 +56,13 @@ async function fetchBackend<T>(path: string): Promise<T> {
 }
 
 export async function loadInitialPlatformData(): Promise<PlatformData> {
-  const callsEndpoint: EndpointConfig<CallRecord[]> = { key: "calls", path: "/calls", fallback: [] };
-  const campaignsEndpoint: EndpointConfig<Campaign[]> = { key: "campaigns", path: "/campaigns", fallback: [] };
-  const callbacksEndpoint: EndpointConfig<CallbackRecord[]> = { key: "callbacks", path: "/callbacks", fallback: [] };
+  const callsEndpoint: EndpointConfig<CallRecord[]> = { key: "calls", path: "", fallback: [] };
+  const campaignsEndpoint: EndpointConfig<Campaign[]> = { key: "campaigns", path: "", fallback: [] };
+  const callbacksEndpoint: EndpointConfig<CallbackRecord[]> = { key: "callbacks", path: "", fallback: [] };
   const meetingsEndpoint: EndpointConfig<MeetingRecord[]> = { key: "meetings", path: "", fallback: [] };
-  const summariesEndpoint: EndpointConfig<SummaryItem[]> = { key: "summaries", path: "/summaries", fallback: [] };
-  const agentsEndpoint: EndpointConfig<Agent[]> = { key: "agents", path: "/agents", fallback: [] };
-  const healthEndpoint: EndpointConfig<ModuleStatus | null> = { key: "health", path: "/twilio", fallback: null };
+  const summariesEndpoint: EndpointConfig<SummaryItem[]> = { key: "summaries", path: "", fallback: [] };
+  const agentsEndpoint: EndpointConfig<Agent[]> = { key: "agents", path: "", fallback: [] };
+  const healthEndpoint: EndpointConfig<ModuleStatus | null> = { key: "health", path: "", fallback: null };
   const endpoints = [
     callsEndpoint,
     campaignsEndpoint,
@@ -77,10 +77,7 @@ export async function loadInitialPlatformData(): Promise<PlatformData> {
     endpoints.map((endpoint) => (endpoint.path ? fetchBackend(endpoint.path) : Promise.resolve(endpoint.fallback))),
   );
   const errors: PlatformData["errors"] = {};
-  const isOptionalProtectedError = (endpoint: EndpointConfig<unknown>, error: unknown) => {
-    if (endpoint.key !== "meetings") {
-      return false;
-    }
+  const isProtectedAuthError = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     return /firebase bearer token|required to access/i.test(message);
   };
@@ -90,7 +87,7 @@ export async function loadInitialPlatformData(): Promise<PlatformData> {
     if (entry.status === "fulfilled") {
       return entry.value as T;
     }
-    if (isOptionalProtectedError(endpoint, entry.reason)) {
+    if (isProtectedAuthError(entry.reason)) {
       return endpoint.fallback;
     }
     errors[endpoint.key] = entry.reason instanceof Error ? entry.reason.message : "Unable to load data.";

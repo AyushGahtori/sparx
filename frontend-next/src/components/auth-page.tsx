@@ -131,9 +131,9 @@ export function AuthPage({ mode }: AuthPageProps) {
               <AuthInput
                 autoComplete="name"
                 icon={<User className="size-4" />}
-                label="Name"
+                label="Full name"
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Name"
+                placeholder="Full name"
                 required
                 value={name}
               />
@@ -200,6 +200,7 @@ export function AuthPage({ mode }: AuthPageProps) {
             alt="SPARX calling interface"
             className="h-full w-full object-cover"
             height={1254}
+            priority
             src="/sparx-assets/phone-mosaic.svg"
             width={1254}
           />

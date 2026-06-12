@@ -82,12 +82,12 @@ function usePlatformData(initialData?: PlatformData) {
   const [error, setError] = useState("");
   const didLoadClientData = useRef(false);
 
-  const refresh = useCallback(async (options: { silent?: boolean } = {}) => {
+  const refresh = useCallback(async (options: { force?: boolean; silent?: boolean } = {}) => {
     if (!options.silent) {
       setStatus("loading");
     }
     try {
-      const nextData = await loadPlatformData();
+      const nextData = await loadPlatformData({ force: options.force ?? !options.silent });
       setData(nextData);
       setStatus("ready");
       setError("");
@@ -2063,9 +2063,11 @@ function SchedulingModal({
   return (
     <div className={cn("fixed inset-0 z-50 grid place-items-center bg-black/35 px-4 py-6 backdrop-blur-sm transition duration-200", isClosing ? "opacity-0" : "opacity-100 animate-[sparx-fade-up_180ms_ease-out_both]")}>
       <form
+        aria-modal="true"
         aria-label="Schedule meeting"
         className={cn("w-[min(760px,92vw)] max-h-[84vh] overflow-auto rounded-[8px] border border-white/70 bg-[var(--sparx-panel)] p-5 shadow-[0_24px_80px_rgba(20,16,8,0.28)] transition duration-200", isClosing ? "translate-y-2 scale-[0.98] opacity-0" : "animate-[sparx-scale-in_220ms_ease-out_both]")}
         onSubmit={submit}
+        role="dialog"
       >
         <div className="mb-4 flex items-start justify-between gap-4 border-b border-[var(--sparx-line)] pb-3">
           <div>
@@ -2604,6 +2606,7 @@ export function MeetingsPage({ initialData }: PageDataProps) {
                   alt="Secured meetings"
                   className="h-full min-h-[190px] w-full object-cover"
                   height={760}
+                  priority
                   src="/sparx-assets/secured-meetings.svg"
                   width={1866}
                 />

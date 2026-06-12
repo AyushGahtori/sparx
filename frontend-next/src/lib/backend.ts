@@ -276,6 +276,10 @@ export type PlatformRealtimeEvent = {
   emitted_at?: string;
 };
 
+const PLATFORM_DATA_CACHE_TTL_MS = 15_000;
+let platformDataCache: { data: PlatformData; loadedAt: number } | null = null;
+let platformDataRequest: Promise<PlatformData> | null = null;
+
 export function platformEventStreamUrl(token?: string) {
   const url = new URL(
     `${apiConfig.baseUrl.replace(/\/$/, "")}/events/stream`,
@@ -287,7 +291,28 @@ export function platformEventStreamUrl(token?: string) {
   return url.toString();
 }
 
-export async function loadPlatformData(): Promise<PlatformData> {
+export async function loadPlatformData(options: { force?: boolean } = {}): Promise<PlatformData> {
+  const now = Date.now();
+  if (!options.force && platformDataCache && now - platformDataCache.loadedAt < PLATFORM_DATA_CACHE_TTL_MS) {
+    return platformDataCache.data;
+  }
+  if (!options.force && platformDataRequest) {
+    return platformDataRequest;
+  }
+
+  platformDataRequest = fetchPlatformData();
+  try {
+    const data = await platformDataRequest;
+    if (!Object.keys(data.errors).length) {
+      platformDataCache = { data, loadedAt: Date.now() };
+    }
+    return data;
+  } finally {
+    platformDataRequest = null;
+  }
+}
+
+async function fetchPlatformData(): Promise<PlatformData> {
   const entries = await Promise.allSettled([
     backend.get<CallRecord[]>("/calls"),
     backend.get<Campaign[]>("/campaigns"),
