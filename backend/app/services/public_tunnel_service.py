@@ -53,7 +53,7 @@ class PublicTunnelService:
     def ensure_public_url_ready_for_call(self) -> None:
         if not self.settings.has_public_base_url:
             if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled:
-                self.ensure_started_for_local_development(wait_until_reachable=True)
+                self.ensure_started_for_local_development(wait_until_reachable=True, force_refresh=True)
             else:
                 raise AppError(
                     status_code=400,
@@ -61,14 +61,24 @@ class PublicTunnelService:
                     message="PUBLIC_BASE_URL must be configured so Twilio can reach the backend status webhooks and media stream bridge.",
                 )
 
-        if self._has_active_quick_tunnel() and self.is_public_base_url_reachable():
+        if self.is_public_base_url_reachable():
             return
 
-        if not self.is_public_base_url_reachable():
-            if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
-                self.ensure_started_for_local_development(wait_until_reachable=True)
-                if self.is_public_base_url_reachable():
+        if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
+            try:
+                self.ensure_started_for_local_development(wait_until_reachable=True, force_refresh=True)
+            except AppError as exc:
+                if exc.code != "public_base_url_unreachable" or not self.settings.normalized_public_base_url:
+                    raise
+                logger.warning(
+                    "Cloudflare quick tunnel URL was detected but was slow to become reachable; retrying readiness probe."
+                )
+                if self._wait_until_public_base_url_reachable(self.settings.public_tunnel_start_timeout_seconds):
                     return
+                raise
+
+            if self.is_public_base_url_reachable():
+                return
 
         if not self.is_public_base_url_reachable():
             raise AppError(
@@ -94,6 +104,14 @@ class PublicTunnelService:
                 return 200 <= response.status < 300
         except (OSError, URLError, TimeoutError, ValueError):
             return False
+
+    def _wait_until_public_base_url_reachable(self, timeout_seconds: int | float) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if self.is_public_base_url_reachable():
+                return True
+            time.sleep(0.5)
+        return self.is_public_base_url_reachable()
 
     def _start_cloudflared_quick_tunnel(self, *, wait_until_reachable: bool) -> str:
         executable = self.settings.cloudflared_executable_file
@@ -145,6 +163,8 @@ class PublicTunnelService:
                 tunnel_url = self._extract_tunnel_url_from_logs()
                 if tunnel_url:
                     self.settings.public_base_url = tunnel_url
+                    self.active_tunnel_url = tunnel_url
+                    self._persist_public_base_url(tunnel_url)
                     if not wait_until_reachable:
                         return tunnel_url
                     logger.info("Cloudflare quick tunnel URL detected, waiting for it to become reachable: %s", tunnel_url)
