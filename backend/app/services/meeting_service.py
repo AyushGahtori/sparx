@@ -15,12 +15,14 @@ from app.repositories.meeting_repository import MeetingRepository, get_meeting_r
 from app.schemas.meeting import (
     MeetingCancelRequest,
     MeetingCancelResponse,
+    MeetingCreateRequest,
     MeetingDeleteResponse,
     MeetingResponse,
     MeetingRescheduleRequest,
     MeetingSyncResponse,
 )
 from app.services.google_calendar_service import GoogleCalendarService, get_google_calendar_service
+from app.services.meeting_email_service import MeetingEmailService, get_meeting_email_service
 from app.utils.lead_email import resolve_lead_email
 from app.utils.time import coerce_utc, utc_now, utc_now_iso
 
@@ -32,12 +34,14 @@ class MeetingService:
         call_repository: CallRepository,
         callback_repository: CallbackRepository,
         google_calendar_service: GoogleCalendarService,
+        meeting_email_service: MeetingEmailService,
         settings: Settings,
     ) -> None:
         self.meeting_repository = meeting_repository
         self.call_repository = call_repository
         self.callback_repository = callback_repository
         self.google_calendar_service = google_calendar_service
+        self.meeting_email_service = meeting_email_service
         self.settings = settings
 
     async def list_meetings(
@@ -56,8 +60,92 @@ class MeetingService:
             date_from=date_from,
             date_to=date_to,
             status=status,
+            owner_user_id=operator_uid,
         )
         return [self._to_response(meeting) for meeting in meetings]
+
+    async def create_meeting(
+        self,
+        payload: MeetingCreateRequest,
+        *,
+        operator_uid: str | None = None,
+    ) -> MeetingResponse:
+        timezone = payload.timezone or self.settings.callback_default_timezone
+        start_time = self._localize(payload.scheduled_for, timezone)
+        if coerce_utc(start_time) <= utc_now():
+            raise AppError(
+                status_code=400,
+                code="meeting_time_in_past",
+                message="Meeting time must be in the future.",
+            )
+        end_time = start_time + timedelta(minutes=self.settings.google_meeting_duration_minutes)
+        meeting_payload = await run_in_threadpool(
+            self.google_calendar_service.create_scheduled_meeting,
+            title=payload.title,
+            description=payload.description,
+            attendee_name=payload.full_name,
+            attendee_email=payload.email,
+            attendee_phone=payload.phone,
+            scheduled_for=start_time,
+            ends_at=end_time,
+            timezone=timezone,
+            notes=payload.notes,
+            operator_uid=operator_uid,
+        )
+        if not meeting_payload.get("meet_link"):
+            raise AppError(
+                status_code=502,
+                code="google_meet_link_missing",
+                message="Google Calendar created the event but did not return a Google Meet link.",
+            )
+
+        email_result = await self._send_optional_meeting_email(meeting_payload, payload.email)
+        calendar_result = {
+            "status": "sent",
+            "provider": "google",
+            "event_id": meeting_payload.get("event_id"),
+            "event_link": meeting_payload.get("event_link"),
+            "meet_link": meeting_payload.get("meet_link"),
+            "delivery": meeting_payload.get("calendar_delivery"),
+        }
+        delivery_details = {
+            "calendar": calendar_result,
+            "email": email_result,
+        }
+        event_id = str(meeting_payload.get("event_id") or uuid4().hex)
+        meeting_id = f"google_{event_id}"
+        now = utc_now()
+        meeting = MeetingDocument(
+            id=meeting_id,
+            owner_user_id=operator_uid,
+            meeting_id=meeting_id,
+            title=payload.title,
+            attendee_name=payload.full_name,
+            attendee_phone=payload.phone,
+            attendee_email=payload.email,
+            attendees=[payload.email],
+            scheduled_for=start_time,
+            ends_at=end_time,
+            timezone=timezone,
+            status="confirmed",
+            calendar_provider="google",
+            external_meeting_id=event_id,
+            event_link=str(meeting_payload.get("event_link") or "") or None,
+            meet_link=str(meeting_payload.get("meet_link") or "") or None,
+            description=payload.description,
+            notes=payload.notes,
+            delivery_status="sent",
+            delivery_details=delivery_details,
+            raw_event={
+                "source": "manual_scheduler",
+                "delivery": delivery_details,
+                "calendar_event": meeting_payload.get("raw_event") or {},
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        saved_meeting = await run_in_threadpool(self.meeting_repository.upsert_meeting, meeting)
+        return self._to_response(saved_meeting)
 
     async def sync_google_meetings(
         self,
@@ -78,7 +166,7 @@ class MeetingService:
         )
         meetings = []
         for event in events:
-            meeting = self._event_to_document(event)
+            meeting = self._event_to_document(event, owner_user_id=operator_uid)
             saved_meeting = await run_in_threadpool(self.meeting_repository.upsert_meeting, meeting)
             meetings.append(saved_meeting)
         meetings.sort(key=lambda meeting: coerce_utc(meeting.scheduled_for))
@@ -91,7 +179,7 @@ class MeetingService:
         *,
         operator_uid: str | None = None,
     ) -> MeetingResponse:
-        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id)
+        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id, owner_user_id=operator_uid)
         timezone = self.settings.callback_default_timezone
         start_time = self._localize(payload.scheduled_for, timezone)
         end_time = self._localize(
@@ -108,12 +196,12 @@ class MeetingService:
         )
         updated_meeting = await run_in_threadpool(
             self.meeting_repository.upsert_meeting,
-            self._event_to_document(event, existing=meeting),
+            self._event_to_document(event, existing=meeting, owner_user_id=operator_uid),
         )
         return self._to_response(updated_meeting)
 
     async def delete_meeting(self, meeting_id: str, *, operator_uid: str | None = None) -> MeetingDeleteResponse:
-        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id)
+        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id, owner_user_id=operator_uid)
         await run_in_threadpool(
             self.google_calendar_service.delete_meet_event,
             meeting.external_meeting_id or meeting.meeting_id,
@@ -129,7 +217,7 @@ class MeetingService:
         *,
         operator_uid: str | None = None,
     ) -> MeetingCancelResponse:
-        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id)
+        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id, owner_user_id=operator_uid)
         if meeting.status == "completed":
             raise AppError(
                 status_code=409,
@@ -182,6 +270,7 @@ class MeetingService:
                     "cancellation_callback_id": callback.callback_id,
                 },
             },
+            owner_user_id=operator_uid,
         )
         return MeetingCancelResponse(
             meeting=self._to_response(updated_meeting),
@@ -190,7 +279,7 @@ class MeetingService:
         )
 
     async def mark_meeting_done(self, meeting_id: str, *, operator_uid: str | None = None) -> MeetingResponse:
-        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id)
+        meeting = await run_in_threadpool(self.meeting_repository.get_meeting, meeting_id, owner_user_id=operator_uid)
         if meeting.external_meeting_id:
             await run_in_threadpool(
                 self.google_calendar_service.delete_meet_event,
@@ -211,10 +300,45 @@ class MeetingService:
                     "calendar_event_removed": bool(meeting.external_meeting_id),
                 },
             },
+            owner_user_id=operator_uid,
         )
         return self._to_response(updated_meeting)
 
-    def _event_to_document(self, event: dict[str, object], existing: MeetingDocument | None = None) -> MeetingDocument:
+    async def _send_optional_meeting_email(self, meeting_payload: dict[str, object], attendee_email: str) -> dict[str, object]:
+        if not self.settings.has_mail_config:
+            return {
+                "status": "skipped",
+                "reason": "mail_not_configured",
+                "recipient": attendee_email,
+            }
+        try:
+            return await run_in_threadpool(
+                self.meeting_email_service.send_meeting_email,
+                meeting=meeting_payload,
+                attendee_email=attendee_email,
+            )
+        except AppError as exc:
+            return {
+                "status": "failed",
+                "error_code": exc.code,
+                "error_message": exc.message,
+                "recipient": attendee_email,
+            }
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "error_code": "mail_send_failed",
+                "error_message": str(exc),
+                "recipient": attendee_email,
+            }
+
+    def _event_to_document(
+        self,
+        event: dict[str, object],
+        existing: MeetingDocument | None = None,
+        *,
+        owner_user_id: str | None = None,
+    ) -> MeetingDocument:
         event_id = str(event.get("id") or "")
         start_time, timezone = self._parse_event_datetime(event.get("start"), fallback_timezone=self.settings.callback_default_timezone)
         end_time, _ = self._parse_event_datetime(event.get("end"), fallback_timezone=self.settings.callback_default_timezone)
@@ -227,6 +351,7 @@ class MeetingService:
         created_at = existing.created_at if existing else utc_now()
         return MeetingDocument(
             id=meeting_id,
+            owner_user_id=existing.owner_user_id if existing and existing.owner_user_id else owner_user_id,
             meeting_id=meeting_id,
             call_id=(existing.call_id if existing else None) or self._extract_private_property(event, "sparx_call_id"),
             project_id=existing.project_id if existing else None,
@@ -253,7 +378,7 @@ class MeetingService:
         call_id = meeting.call_id or self._extract_private_property(meeting.raw_event, "sparx_call_id")
         if call_id:
             try:
-                return self.call_repository.get_call(call_id)
+                return self.call_repository.get_call(call_id, owner_user_id=meeting.owner_user_id)
             except AppError as exc:
                 if exc.code != "call_not_found":
                     raise
@@ -261,7 +386,7 @@ class MeetingService:
         event_id = meeting.external_meeting_id
         if not event_id:
             return None
-        for call in self.call_repository.list_calls():
+        for call in self.call_repository.list_calls(owner_user_id=meeting.owner_user_id):
             invite = call.metadata.get("meeting_invite")
             if not isinstance(invite, dict):
                 continue
@@ -291,6 +416,7 @@ class MeetingService:
         lead_email = resolve_lead_email(direct_email=origin_call.email, metadata=origin_call.metadata)
         callback_document = CallbackDocument(
             id=callback_id,
+            owner_user_id=origin_call.owner_user_id,
             callback_id=callback_id,
             call_id=origin_call.call_id,
             campaign_id=origin_call.campaign_id,
@@ -458,5 +584,6 @@ def get_meeting_service() -> MeetingService:
         call_repository=get_call_repository(),
         callback_repository=get_callback_repository(),
         google_calendar_service=get_google_calendar_service(),
+        meeting_email_service=get_meeting_email_service(),
         settings=get_settings(),
     )

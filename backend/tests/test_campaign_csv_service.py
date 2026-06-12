@@ -1,6 +1,4 @@
 from io import BytesIO
-from zipfile import ZipFile
-
 import pytest
 from fastapi import UploadFile
 from openpyxl import Workbook
@@ -41,25 +39,6 @@ def build_company_only_xlsx_bytes() -> bytes:
     sheet.append(["Aaron Textiles", "9812345678", "Manufacturing", "info@aarontextiles.in"])
     buffer = BytesIO()
     workbook.save(buffer)
-    return buffer.getvalue()
-
-
-def build_docx_bytes() -> bytes:
-    xml_content = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-      <w:body>
-        <w:p><w:r><w:t>Name: Riya Sharma</w:t></w:r></w:p>
-        <w:p><w:r><w:t>Phone: +919876543210</w:t></w:r></w:p>
-        <w:p><w:r><w:t>Company: Blue Orbit</w:t></w:r></w:p>
-        <w:p><w:r><w:t>Email: riya@blueorbit.com</w:t></w:r></w:p>
-        <w:p><w:r><w:t>Role: Sales Director</w:t></w:r></w:p>
-        <w:p><w:r><w:t>Interest: Wants a demo</w:t></w:r></w:p>
-      </w:body>
-    </w:document>
-    """
-    buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("word/document.xml", xml_content)
     return buffer.getvalue()
 
 
@@ -113,18 +92,14 @@ async def test_campaign_xlsx_preview_accepts_company_name_and_number_columns():
 
 
 @pytest.mark.asyncio
-async def test_campaign_docx_preview_extracts_labeled_contacts():
+async def test_campaign_preview_rejects_non_spreadsheet_files():
     service = build_service()
-    upload = UploadFile(filename="contacts.docx", file=BytesIO(build_docx_bytes()))
+    upload = UploadFile(filename="contacts.docx", file=BytesIO(b"not-a-renewal-sheet"))
 
-    preview = await service.preview_upload(upload)
+    with pytest.raises(AppError) as exc_info:
+        await service.preview_upload(upload)
 
-    assert preview.file_type == "docx"
-    assert preview.valid_contacts == 1
-    assert preview.contacts[0].name == "Riya Sharma"
-    assert preview.contacts[0].phone == "+919876543210"
-    assert preview.contacts[0].company == "Blue Orbit"
-    assert preview.contacts[0].interest == "Wants a demo"
+    assert exc_info.value.code == "unsupported_lead_file_type"
 
 
 @pytest.mark.asyncio

@@ -67,6 +67,7 @@ class CallbackService:
         source: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        owner_user_id: str | None = None,
     ) -> list[CallbackResponse]:
         callbacks = await run_in_threadpool(
             self.callback_repository.list_callbacks,
@@ -75,15 +76,16 @@ class CallbackService:
             source=source,
             date_from=date_from,
             date_to=date_to,
+            owner_user_id=owner_user_id,
         )
         callbacks.sort(key=self._sort_key)
         return [self._to_response(callback_document) for callback_document in callbacks]
 
-    async def get_callback(self, callback_id: str) -> CallbackResponse:
-        callback_document = await run_in_threadpool(self.callback_repository.get_callback, callback_id)
+    async def get_callback(self, callback_id: str, *, owner_user_id: str | None = None) -> CallbackResponse:
+        callback_document = await run_in_threadpool(self.callback_repository.get_callback, callback_id, owner_user_id=owner_user_id)
         return self._to_response(callback_document)
 
-    async def create_callback(self, payload: CallbackCreateRequest) -> CallbackResponse:
+    async def create_callback(self, payload: CallbackCreateRequest, *, owner_user_id: str | None = None) -> CallbackResponse:
         agent_configuration = await self._resolve_agent_configuration(payload.agent_id)
         time_resolution = self.time_service.resolve_requested_time(
             payload.requested_time_raw,
@@ -103,6 +105,7 @@ class CallbackService:
         callback_id = f"callback_{uuid4().hex}"
         callback_document = CallbackDocument(
             id=callback_id,
+            owner_user_id=owner_user_id,
             callback_id=callback_id,
             lead_name=payload.lead_name,
             phone=payload.phone,
@@ -150,8 +153,10 @@ class CallbackService:
         self,
         callback_id: str,
         payload: CallbackUpdateRequest,
+        *,
+        owner_user_id: str | None = None,
     ) -> CallbackResponse:
-        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id)
+        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id, owner_user_id=owner_user_id)
         updates: dict[str, object] = {}
 
         for field_name in ("lead_name", "phone", "callback_reason", "notes", "language", "company", "city", "role", "interest"):
@@ -211,8 +216,10 @@ class CallbackService:
         self,
         callback_id: str,
         payload: CallbackRescheduleRequest,
+        *,
+        owner_user_id: str | None = None,
     ) -> CallbackResponse:
-        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id)
+        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id, owner_user_id=owner_user_id)
         time_resolution = self.time_service.resolve_requested_time(
             payload.requested_time_raw,
             timezone_name=payload.timezone or existing_callback.timezone,
@@ -246,11 +253,12 @@ class CallbackService:
         self.runner_service.kick()
         return self._to_response(updated_callback)
 
-    async def execute_callback_now(self, callback_id: str) -> CallbackResponse:
+    async def execute_callback_now(self, callback_id: str, *, owner_user_id: str | None = None) -> CallbackResponse:
+        await run_in_threadpool(self.callback_repository.get_callback, callback_id, owner_user_id=owner_user_id)
         return await self.runner_service.execute_callback_now(callback_id)
 
-    async def delete_callback(self, callback_id: str) -> CallbackDeleteResponse:
-        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id)
+    async def delete_callback(self, callback_id: str, *, owner_user_id: str | None = None) -> CallbackDeleteResponse:
+        existing_callback = await run_in_threadpool(self.callback_repository.get_callback, callback_id, owner_user_id=owner_user_id)
         if existing_callback.status in self.non_deletable_statuses:
             raise AppError(
                 status_code=409,

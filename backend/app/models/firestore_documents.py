@@ -39,6 +39,7 @@ class ProjectDocument(FirestoreDocument):
 
 
 class CallDocument(FirestoreDocument):
+    owner_user_id: str | None = None
     conversation_stage: Literal[
         "NEW",
         "PRODUCT_INTRO",
@@ -125,6 +126,7 @@ class CallDocument(FirestoreDocument):
 
 
 class CampaignDocument(FirestoreDocument):
+    owner_user_id: str | None = None
     campaign_id: str
     campaign_name: str
     agent_id: str
@@ -155,6 +157,7 @@ class CampaignDocument(FirestoreDocument):
 
 
 class CampaignContactDocument(FirestoreDocument):
+    owner_user_id: str | None = None
     contact_id: str
     campaign_id: str
     name: str
@@ -196,6 +199,7 @@ class CampaignContactDocument(FirestoreDocument):
 
 
 class CallbackDocument(FirestoreDocument):
+    owner_user_id: str | None = None
     callback_id: str
     call_id: str | None = None
     campaign_id: str | None = None
@@ -262,11 +266,13 @@ class CallbackDocument(FirestoreDocument):
 
 
 class MeetingDocument(FirestoreDocument):
+    owner_user_id: str | None = None
     meeting_id: str
     project_id: str | None = None
     call_id: str | None = None
     title: str
     attendee_name: str | None = None
+    attendee_phone: str | None = None
     attendee_email: str | None = None
     attendees: list[str] = Field(default_factory=list)
     scheduled_for: datetime
@@ -278,6 +284,9 @@ class MeetingDocument(FirestoreDocument):
     event_link: str | None = None
     meet_link: str | None = None
     description: str | None = None
+    notes: str | None = None
+    delivery_status: str | None = None
+    delivery_details: dict[str, Any] = Field(default_factory=dict)
     completed_at: datetime | None = None
     cancelled_at: datetime | None = None
     cancel_reason: str | None = None

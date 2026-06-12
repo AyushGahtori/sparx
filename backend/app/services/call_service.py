@@ -85,13 +85,14 @@ class CallService:
         self.meeting_email_service = meeting_email_service
         self.public_tunnel_service = public_tunnel_service
 
-    async def start_individual_call(self, payload: IndividualCallRequest) -> CallResponse:
+    async def start_individual_call(self, payload: IndividualCallRequest, *, owner_user_id: str | None = None) -> CallResponse:
         await run_in_threadpool(self.public_tunnel_service.ensure_public_url_ready_for_call)
         duplicate_call = await run_in_threadpool(
             partial(
                 self.call_repository.find_recent_duplicate_individual_call,
                 payload.phone,
                 within_minutes=self.settings.duplicate_manual_call_window_minutes,
+                owner_user_id=owner_user_id,
             ),
         )
         if duplicate_call is not None:
@@ -110,6 +111,7 @@ class CallService:
 
         call_document = CallDocument(
             id=call_id,
+            owner_user_id=owner_user_id,
             call_id=call_id,
             lead_name=payload.lead_name,
             phone=payload.phone,
@@ -174,6 +176,7 @@ class CallService:
 
         call_document = CallDocument(
             id=call_id,
+            owner_user_id=campaign.owner_user_id,
             call_id=call_id,
             lead_name=contact.name,
             phone=contact.phone,
@@ -347,16 +350,16 @@ class CallService:
         await self._sync_campaign_state(updated_call)
         return self._to_response(updated_call)
 
-    async def get_call(self, call_id: str) -> CallResponse:
-        call_document = await run_in_threadpool(self.call_repository.get_call, call_id)
+    async def get_call(self, call_id: str, *, owner_user_id: str | None = None) -> CallResponse:
+        call_document = await run_in_threadpool(self.call_repository.get_call, call_id, owner_user_id=owner_user_id)
         return self._to_response(call_document)
 
-    async def list_calls(self) -> list[CallResponse]:
-        call_documents = await run_in_threadpool(self.call_repository.list_calls)
+    async def list_calls(self, *, owner_user_id: str | None = None) -> list[CallResponse]:
+        call_documents = await run_in_threadpool(self.call_repository.list_calls, owner_user_id=owner_user_id)
         return [self._to_response(call_document) for call_document in call_documents]
 
-    async def list_recorded_calls(self) -> list[CallResponse]:
-        call_documents = await run_in_threadpool(self.call_repository.list_calls)
+    async def list_recorded_calls(self, *, owner_user_id: str | None = None) -> list[CallResponse]:
+        call_documents = await run_in_threadpool(self.call_repository.list_calls, owner_user_id=owner_user_id)
         recorded_calls = [
             call_document
             for call_document in call_documents
@@ -364,8 +367,8 @@ class CallService:
         ]
         return [self._to_response(call_document) for call_document in recorded_calls]
 
-    async def delete_call(self, call_id: str) -> CallDeleteResponse:
-        existing_call = await run_in_threadpool(self.call_repository.get_call, call_id)
+    async def delete_call(self, call_id: str, *, owner_user_id: str | None = None) -> CallDeleteResponse:
+        existing_call = await run_in_threadpool(self.call_repository.get_call, call_id, owner_user_id=owner_user_id)
         if existing_call.call_type != "individual" or existing_call.campaign_id or existing_call.contact_id or existing_call.callback_id:
             raise AppError(
                 status_code=409,
@@ -1230,13 +1233,16 @@ class CallService:
                 "error_message": str(exc),
                 "recipient": call_document.email,
             }
+        calendar_delivered = calendar_result.get("status") == "sent" and bool(meeting_payload.get("meet_link"))
+        email_delivered = email_result.get("status") == "sent" and bool(meeting_payload.get("meet_link"))
+        delivery_sent = calendar_delivered or email_delivered
         metadata["meeting_invite"] = {
             **meeting_payload,
             "calendar": calendar_result,
             "email": email_result,
-            "status": "sent" if email_result.get("status") == "sent" else "failed",
-            "sent_at": utc_now_iso() if email_result.get("status") == "sent" else None,
-            "failed_at": utc_now_iso() if email_result.get("status") != "sent" else None,
+            "status": "sent" if delivery_sent else "failed",
+            "sent_at": utc_now_iso() if delivery_sent else None,
+            "failed_at": utc_now_iso() if not delivery_sent else None,
             "source": "call_status",
         }
         updated_call = await run_in_threadpool(
@@ -1244,17 +1250,17 @@ class CallService:
             call_document.call_id,
             {
                 "metadata": metadata,
-                "meeting_booked": True,
-                "conversation_stage": "MEETING_BOOKED",
+                "meeting_booked": delivery_sent,
+                "conversation_stage": "MEETING_BOOKED" if delivery_sent else call_document.conversation_stage,
             },
         )
         await self.append_event(
             call_document.call_id,
-            event_type="meeting_invite_sent" if email_result.get("status") == "sent" else "meeting_invite_failed",
+            event_type="meeting_invite_sent" if delivery_sent else "meeting_invite_failed",
             message=(
-                "Meeting email sent to the saved lead email."
-                if email_result.get("status") == "sent"
-                else "Meeting email could not be sent automatically."
+                "Meeting invitation sent to the saved lead email."
+                if delivery_sent
+                else "Meeting invitation could not be sent automatically."
             ),
             payload=metadata["meeting_invite"],
         )
@@ -1265,6 +1271,12 @@ class CallService:
         existing_invite = call_document.metadata.get("meeting_invite")
         if not isinstance(existing_invite, dict):
             return False
+        if (
+            existing_invite.get("status") == "sent"
+            and normalize_email(existing_invite.get("attendee_email")) == normalize_email(call_document.email)
+            and existing_invite.get("meet_link")
+        ):
+            return True
         email_result = existing_invite.get("email")
         if not isinstance(email_result, dict):
             return False

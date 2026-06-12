@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -11,12 +12,10 @@ import {
   CheckCircle2,
   Clock3,
   Download,
-  Folder,
   Phone,
   RefreshCw,
   RotateCcw,
   Send,
-  Sparkles,
   Trash2,
   Upload,
   User,
@@ -29,11 +28,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { useAuth } from "@/components/auth-provider";
 import {
   AppShell,
-  AssetFrame,
   EmptyState,
   GreetingHeader,
   PageCanvas,
@@ -50,6 +50,7 @@ import {
   type Campaign,
   type CampaignPreview,
   type IndividualCallPayload,
+  type MeetingCreatePayload,
   type MeetingRecord,
   type PlatformRealtimeEvent,
   type PlatformData,
@@ -75,12 +76,16 @@ type PageDataProps = {
 };
 
 function usePlatformData(initialData?: PlatformData) {
+  const { loading: authLoading, user } = useAuth();
   const [data, setData] = useState<PlatformData | null>(initialData ?? null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(initialData ? "ready" : "loading");
   const [error, setError] = useState("");
+  const didLoadClientData = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setStatus("loading");
+  const refresh = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) {
+      setStatus("loading");
+    }
     try {
       const nextData = await loadPlatformData();
       setData(nextData);
@@ -93,7 +98,22 @@ function usePlatformData(initialData?: PlatformData) {
   }, []);
 
   useEffect(() => {
+    if (!authLoading && user && !didLoadClientData.current) {
+      const timer = window.setTimeout(() => {
+        didLoadClientData.current = true;
+        void refresh({ silent: Boolean(data) });
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [authLoading, data, refresh, user]);
+
+  useEffect(() => {
+    if (authLoading || !user) {
+      return;
+    }
     let eventSource: EventSource | null = null;
+    let isDisposed = false;
 
     const applyEvent = (event: PlatformRealtimeEvent) => {
       if (event.topic === "call.deleted") {
@@ -131,20 +151,27 @@ function usePlatformData(initialData?: PlatformData) {
       setError("");
     };
 
-    const connect = () => {
+    const connect = async () => {
       if (eventSource || (typeof document !== "undefined" && document.visibilityState === "hidden")) {
         return;
       }
-      eventSource = new EventSource(platformEventStreamUrl());
-      eventSource.addEventListener("call.updated", (message) => {
+      const token = await user.getIdToken();
+      if (isDisposed || (typeof document !== "undefined" && document.visibilityState === "hidden")) {
+        return;
+      }
+      const source = new EventSource(platformEventStreamUrl(token));
+      eventSource = source;
+      source.addEventListener("call.updated", (message) => {
         applyEvent(JSON.parse(message.data) as PlatformRealtimeEvent);
       });
-      eventSource.addEventListener("call.deleted", (message) => {
+      source.addEventListener("call.deleted", (message) => {
         applyEvent(JSON.parse(message.data) as PlatformRealtimeEvent);
       });
-      eventSource.onerror = () => {
-        eventSource?.close();
-        eventSource = null;
+      source.onerror = () => {
+        source.close();
+        if (eventSource === source) {
+          eventSource = null;
+        }
       };
     };
 
@@ -155,19 +182,20 @@ function usePlatformData(initialData?: PlatformData) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        connect();
+        void connect();
       } else {
         disconnect();
       }
     };
 
-    connect();
+    void connect();
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
+      isDisposed = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       disconnect();
     };
-  }, []);
+  }, [authLoading, user]);
 
   return { data, status, error, refresh };
 }
@@ -462,6 +490,36 @@ function SelectField({
   );
 }
 
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  rows = 3,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  rows?: number;
+}) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-sm font-black">{label}</span>
+      <textarea
+        className="min-h-24 resize-none rounded-[6px] border border-[var(--sparx-line-strong)] bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-[var(--sparx-yellow)] focus:ring-2 focus:ring-[rgba(241,231,47,0.36)]"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        required={required}
+        rows={rows}
+      />
+    </label>
+  );
+}
+
 function MiniMetric({ value, label }: { value: number | string; label: string }) {
   return (
     <div>
@@ -473,14 +531,6 @@ function MiniMetric({ value, label }: { value: number | string; label: string })
 
 function callDisplayName(call: CallRecord | SummaryDetail) {
   return call.lead_name || call.phone || "Unknown lead";
-}
-
-function getLatestCall(calls: CallRecord[]) {
-  return [...calls].sort((a, b) => {
-    const left = new Date(a.started_at || a.created_at || 0).getTime();
-    const right = new Date(b.started_at || b.created_at || 0).getTime();
-    return right - left;
-  })[0];
 }
 
 function getTranscriptLineCount(calls: CallRecord[]) {
@@ -497,7 +547,6 @@ export function DashboardPage({ initialData }: PageDataProps) {
   const monthCampaigns = campaigns.filter((campaign) => isInMonth(getRecordDate(campaign), selectedMonth));
   const monthMeetings = meetings.filter((meeting) => isInMonth(getRecordDate(meeting), selectedMonth));
   const activeCalls = monthCalls.filter((call) => activeCallStatuses.has(call.status));
-  const latestActiveCall = activeCalls[0] || getLatestCall(calls);
   const transcriptLines = getTranscriptLineCount(monthCalls);
   const contacts = monthCampaigns.reduce((sum, campaign) => sum + campaign.total_contacts, 0);
   const meetingCount = monthMeetings.length || monthCalls.filter((call) => call.meeting_requested || call.meeting_time).length;
@@ -514,42 +563,19 @@ export function DashboardPage({ initialData }: PageDataProps) {
               <StatusBadge tone={data?.health?.backend === "healthy" ? "active" : "warning"}>
                 {data?.health?.backend === "healthy" ? "System Active" : "System Degraded"}
               </StatusBadge>
-              <PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh}>
+              <PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>
                 Refresh
               </PrimaryButton>
             </div>
           }
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
-          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <section className="grid gap-4 sm:grid-cols-2">
-              <StatCard label="Active- Calls" value={activeCalls.length} caption="Real-time Sessions" icon={previewIcons.calls} />
-              <StatCard label="Transcripts" value={transcriptLines} caption="Live utterances" icon={previewIcons.transcript} />
-              <StatCard label="Contacts" value={contacts} caption="Ready to Dial" icon={<User className="size-4" />} />
-              <StatCard label="Meetings" value={meetingCount} caption="Booked Outcomes" icon={<CalendarCheck className="size-4" />} tone="olive" />
-            </section>
-            <section>
-              <h3 className="mb-2 text-xl font-black">Call Transcript</h3>
-              <div className="grid min-h-[360px] place-items-center rounded-[8px] bg-[var(--sparx-card-strong)] p-5">
-                {latestActiveCall?.transcript?.length ? (
-                  <ScrollPanel className="w-full bg-transparent p-0">
-                    {latestActiveCall.transcript.slice(-8).map((entry) => (
-                      <div key={entry.entry_id} className="mb-3 rounded-[8px] bg-white/75 p-3 text-sm font-semibold">
-                        <span className="font-black capitalize">{entry.speaker}</span>
-                        <p>{entry.text}</p>
-                      </div>
-                    ))}
-                  </ScrollPanel>
-                ) : (
-                  <div className="text-center">
-                    <Sparkles className="mx-auto size-10 text-white" />
-                    <p className="mt-2 text-lg font-black">*Awkward Silence</p>
-                    <p className="text-sm font-semibold text-[var(--sparx-muted)]">No live telemetry yet</p>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
+          <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Active Calls" value={activeCalls.length} caption="Real-time Sessions" icon={previewIcons.calls} />
+            <StatCard label="Transcripts" value={transcriptLines} caption="Live utterances" icon={previewIcons.transcript} />
+            <StatCard label="Contacts" value={contacts} caption="Ready to Dial" icon={<User className="size-4" />} />
+            <StatCard label="Meetings" value={meetingCount} caption="Booked Outcomes" icon={<CalendarCheck className="size-4" />} tone="olive" />
+          </section>
         </PageCanvas>
       </PageFrame>
     </AppShell>
@@ -599,7 +625,7 @@ export function LogsPage({ initialData }: PageDataProps) {
       <PageFrame>
         <PageCanvas
           title="Session Logs"
-          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh}>{currentMonthLabel()}</PrimaryButton>}
+          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>{currentMonthLabel()}</PrimaryButton>}
         >
           <p className="max-w-xl text-sm font-semibold text-[var(--sparx-muted)]">
             Open any call in a dedicated transcript window without touching the live dashboard transcripts.
@@ -657,6 +683,13 @@ type CampaignFormState = {
   dispatch_mode: "parallel" | "one_by_one";
 };
 
+const supportedRenewalExtensions = [".csv", ".xlsx", ".xls"];
+
+function isSupportedRenewalFile(file: File) {
+  const lowered = file.name.toLowerCase();
+  return supportedRenewalExtensions.some((extension) => lowered.endsWith(extension));
+}
+
 export function CampaignPage({ initialData }: PageDataProps) {
   const { data, status, error, refresh } = usePlatformData(initialData);
   const [preview, setPreview] = useState<CampaignPreview | null>(null);
@@ -676,10 +709,53 @@ export function CampaignPage({ initialData }: PageDataProps) {
     dispatch_mode: "parallel",
   });
   const selectedAgentId = form.agent_id || agents[0]?.agent_id || "";
+  const [recordStatus, setRecordStatus] = useState<"all" | Campaign["status"]>("all");
+  const [recordSort, setRecordSort] = useState<"recent" | "progress" | "contacts">("recent");
+  const formReady = Boolean(
+    form.campaign_name.trim()
+    && selectedAgentId
+    && form.campaign_type.trim()
+    && form.language.trim()
+    && form.call_objective.trim()
+    && form.product_description.trim(),
+  );
+  const fileValidationPassed = Boolean(
+    preview
+    && preview.valid_contacts > 0
+    && preview.invalid_contacts === 0
+    && preview.duplicate_contacts === 0,
+  );
+  const mappingComplete = Boolean(preview?.source_columns.length && preview?.contacts.length);
+  const disabledReason = busy
+    ? "Validation is still running."
+    : !formReady
+      ? "Complete campaign setup and product details first."
+      : !preview
+        ? "Upload a CSV or Excel renewal sheet."
+        : !mappingComplete
+          ? "The backend could not map the customer phone column."
+          : !fileValidationPassed
+            ? "Resolve invalid or duplicate rows before creating the campaign."
+            : "";
+  const canCreateCampaign = !disabledReason;
+  const campaignMetrics = campaignTotals(campaigns);
+  const filteredCampaigns = campaigns
+    .filter((campaign) => recordStatus === "all" || campaign.status === recordStatus)
+    .sort((a, b) => {
+      if (recordSort === "contacts") return b.total_contacts - a.total_contacts;
+      if (recordSort === "progress") return (b.progress_percent ?? 0) - (a.progress_percent ?? 0);
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!isSupportedRenewalFile(file)) {
+      setPreview(null);
+      setMessage("Unsupported file. Upload a CSV, XLSX, or XLS renewal sheet.");
+      event.target.value = "";
+      return;
+    }
     setBusy(true);
     setMessage("Validating lead file...");
     try {
@@ -696,8 +772,8 @@ export function CampaignPage({ initialData }: PageDataProps) {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!preview?.contacts.length) {
-      setMessage("Upload and validate a lead file before creating a campaign.");
+    if (!canCreateCampaign || !preview) {
+      setMessage(disabledReason || "Upload and validate a renewal sheet before creating a campaign.");
       return;
     }
     setBusy(true);
@@ -736,6 +812,20 @@ export function CampaignPage({ initialData }: PageDataProps) {
     }
   }
 
+  async function runCampaignAction(action: Promise<Campaign>, success: string) {
+    setBusy(true);
+    setMessage("Updating campaign...");
+    try {
+      await action;
+      setMessage(success);
+      await refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Campaign action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const updateForm = <K extends keyof CampaignFormState>(key: K, value: CampaignFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -765,52 +855,143 @@ export function CampaignPage({ initialData }: PageDataProps) {
                     <option value="one_by_one">One by one</option>
                   </SelectField>
                 </div>
-                <div className="mt-4 rounded-[8px] border border-dashed border-[var(--sparx-line-strong)] bg-white p-4">
-                  <label className="grid gap-2 text-sm font-black">
-                    Renewal Sheet Import
-                    <input accept=".csv,.xlsx,.xls,.pdf,.doc,.docx,.txt" disabled={busy} onChange={handleFile} type="file" />
-                  </label>
-                </div>
                 {message ? <p className="mt-3 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <PrimaryButton disabled={busy || !preview?.contacts.length || !selectedAgentId} type="submit">Create Campaign</PrimaryButton>
-                  <PrimaryButton onClick={refresh} type="button" variant="soft">Refresh</PrimaryButton>
+                  <PrimaryButton disabled={!canCreateCampaign} title={disabledReason || "Create campaign"} type="submit">Create Campaign</PrimaryButton>
+                  <PrimaryButton onClick={() => void refresh()} type="button" variant="soft">Refresh</PrimaryButton>
                 </div>
+                {disabledReason ? <p className="mt-2 text-xs font-bold text-[var(--sparx-muted)]">{disabledReason}</p> : null}
               </form>
-              <div className="grid gap-4">
-                <AssetFrame title="Campaign visual asset" description="Frame reserved for exported Figma image." />
-                <div className="rounded-[8px] bg-[var(--sparx-card-strong)] p-4">
+              <div>
+                <div className="rounded-[8px] bg-[var(--sparx-card-strong)] p-4 text-center">
+                  <div className="mx-auto mb-3 grid size-12 place-items-center rounded-[8px] bg-white text-[var(--sparx-olive)]">
+                    <Upload className="size-7" />
+                  </div>
                   <h3 className="text-lg font-black">Renewal Sheet Import</h3>
+                  <p className="mx-auto mt-2 max-w-[300px] text-sm font-semibold text-[var(--sparx-muted)]">
+                    Upload CSV or Excel data. Sparx automatically maps the customer phone column before creating the queue.
+                  </p>
+                  <label className="mt-4 inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-white px-6 text-sm font-black text-black ring-1 ring-[var(--sparx-line)] transition hover:bg-[var(--sparx-panel)]">
+                    <input accept=".csv,.xlsx,.xls" className="sr-only" disabled={busy} onChange={handleFile} type="file" />
+                    Select Renewal File
+                  </label>
                   {preview ? (
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                       <MiniMetric value={preview.valid_contacts} label="Valid" />
                       <MiniMetric value={preview.invalid_contacts} label="Invalid" />
                       <MiniMetric value={preview.duplicate_contacts} label="Duplicate" />
                     </div>
                   ) : (
-                    <p className="mt-2 text-sm font-semibold text-[var(--sparx-muted)]">Upload a file to show backend validation results.</p>
+                    <p className="mt-3 text-xs font-bold text-[var(--sparx-muted)]">Supported formats: CSV, XLSX, XLS.</p>
                   )}
+                  {preview ? (
+                    <div className="mt-3 rounded-[8px] bg-white/70 p-3 text-left text-xs font-bold text-[var(--sparx-muted)]">
+                      <p>{preview.filename}</p>
+                      <p>{mappingComplete ? "Phone column mapped by backend." : "Phone column mapping pending."}</p>
+                      <p>{fileValidationPassed ? "Validation passed." : "Validation needs attention before campaign creation."}</p>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
           </PageCanvas>
         </section>
         <section className="mt-5">
-          <h3 className="mb-3 text-xl font-black">Campaign Records</h3>
-          {campaigns.length ? (
-            <div className="grid gap-3">
-              {campaigns.map((campaign) => (
-                <article key={campaign.campaign_id} className="flex flex-col gap-3 rounded-[8px] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <StatusBadge tone={campaign.status === "running" ? "active" : "neutral"}>{humanize(campaign.status)}</StatusBadge>
-                    <h4 className="mt-2 text-xl font-black">{campaign.campaign_name}</h4>
-                    <p className="text-sm font-semibold text-[var(--sparx-muted)]">{campaign.completed_calls}/{campaign.total_contacts} completed | {campaign.agent_name}</p>
-                  </div>
-                  <PrimaryButton onClick={() => services.startCampaign(campaign.campaign_id).then(refresh)} variant="soft">Start</PrimaryButton>
-                </article>
-              ))}
+          <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="text-xl font-black">Campaign Records</h3>
+              <p className="text-sm font-semibold text-[var(--sparx-muted)]">Track imports, validation quality, queue status, and campaign performance.</p>
             </div>
-          ) : <EmptyState title="No campaigns yet" description="Created backend campaigns will appear here." />}
+            <div className="flex flex-wrap gap-2">
+              {["all", "scheduled", "running", "paused", "completed", "failed"].map((statusKey) => (
+                <button
+                  className={cn(
+                    "rounded-full px-4 py-2 text-xs font-black transition",
+                    recordStatus === statusKey ? "bg-[var(--sparx-olive)] text-white" : "bg-white text-[var(--sparx-muted)] ring-1 ring-[var(--sparx-line)]",
+                  )}
+                  key={statusKey}
+                  onClick={() => setRecordStatus(statusKey as typeof recordStatus)}
+                  type="button"
+                >
+                  {humanize(statusKey)}
+                </button>
+              ))}
+              <select
+                className="h-9 rounded-full border border-[var(--sparx-line)] bg-white px-3 text-xs font-black outline-none"
+                value={recordSort}
+                onChange={(event) => setRecordSort(event.target.value as typeof recordSort)}
+              >
+                <option value="recent">Newest</option>
+                <option value="progress">Progress</option>
+                <option value="contacts">Contacts</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Imported" value={formatNumber(campaignMetrics.imported)} caption="Total queued contacts" icon={<Download className="size-4" />} tone="white" />
+            <StatCard label="Processing" value={formatNumber(campaignMetrics.processing)} caption="Pending or active" icon={<RefreshCw className="size-4" />} tone="white" />
+            <StatCard label="Completed" value={formatNumber(campaignMetrics.completed)} caption="Finished calls" icon={<CheckCircle2 className="size-4" />} tone="olive" />
+            <StatCard label="Failed" value={formatNumber(campaignMetrics.failed)} caption="Needs review" icon={<AlertCircle className="size-4" />} tone="white" />
+          </div>
+
+          {filteredCampaigns.length ? (
+            <div className="grid gap-3">
+              {filteredCampaigns.map((campaign) => {
+                const leadSource = (campaign.metadata?.lead_source || {}) as Record<string, unknown>;
+                const filename = typeof leadSource.filename === "string" && leadSource.filename ? leadSource.filename : "Manual import";
+                const invalidContacts = Number(leadSource.invalid_contacts || 0);
+                const duplicateContacts = Number(leadSource.duplicate_contacts || 0);
+                const progress = Math.max(0, Math.min(100, campaign.progress_percent ?? campaign.progress_percentage ?? 0));
+                return (
+                  <article key={campaign.campaign_id} className="rounded-[8px] bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={statusTone(campaign.status)}>{humanize(campaign.status)}</StatusBadge>
+                          <span className="text-xs font-black text-[var(--sparx-muted)]">{formatDateTime(campaign.created_at)}</span>
+                        </div>
+                        <h4 className="mt-2 text-xl font-black">{campaign.campaign_name}</h4>
+                        <p className="text-sm font-semibold text-[var(--sparx-muted)]">{campaign.agent_name} | {campaign.total_contacts} contacts | {campaign.dispatch_mode.replace(/_/g, " ")}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {campaign.status === "running" ? (
+                          <PrimaryButton disabled={busy} onClick={() => void runCampaignAction(services.pauseCampaign(campaign.campaign_id), "Campaign paused.")} variant="soft">Pause</PrimaryButton>
+                        ) : campaign.status === "paused" ? (
+                          <PrimaryButton disabled={busy} onClick={() => void runCampaignAction(services.resumeCampaign(campaign.campaign_id), "Campaign resumed.")} variant="soft">Resume</PrimaryButton>
+                        ) : campaign.status !== "completed" && campaign.status !== "cancelled" ? (
+                          <PrimaryButton disabled={busy} onClick={() => void runCampaignAction(services.startCampaign(campaign.campaign_id), "Campaign started.")} variant="soft">Start</PrimaryButton>
+                        ) : null}
+                        {["running", "paused", "scheduled"].includes(campaign.status) ? (
+                          <PrimaryButton disabled={busy} onClick={() => void runCampaignAction(services.stopCampaign(campaign.campaign_id), "Campaign stopped.")} variant="soft">Stop</PrimaryButton>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--sparx-panel)]">
+                      <div className="h-full rounded-full bg-[var(--sparx-olive)] transition-all duration-500" style={{ width: `${progress}%` }} />
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-[8px] bg-[var(--sparx-panel)] p-3">
+                        <p className="text-xs font-black uppercase text-[var(--sparx-muted)]">Import History</p>
+                        <p className="mt-1 truncate text-sm font-black">{filename}</p>
+                        <p className="text-xs font-semibold text-[var(--sparx-muted)]">{leadSource.file_type ? String(leadSource.file_type).toUpperCase() : "Source"} | {formatNumber(Number(leadSource.valid_contacts || campaign.total_contacts))} valid</p>
+                      </div>
+                      <div className="rounded-[8px] bg-[var(--sparx-panel)] p-3">
+                        <p className="text-xs font-black uppercase text-[var(--sparx-muted)]">Validation History</p>
+                        <p className="mt-1 text-sm font-black">{invalidContacts} invalid | {duplicateContacts} duplicate</p>
+                        <p className="text-xs font-semibold text-[var(--sparx-muted)]">{invalidContacts || duplicateContacts ? "Review source data before reimport." : "Import validation passed."}</p>
+                      </div>
+                      <div className="rounded-[8px] bg-[var(--sparx-panel)] p-3">
+                        <p className="text-xs font-black uppercase text-[var(--sparx-muted)]">Campaign Analytics</p>
+                        <p className="mt-1 text-sm font-black">{campaign.completed_calls}/{campaign.total_contacts} completed | {formatNumber(campaign.success_rate)}% success</p>
+                        <p className="text-xs font-semibold text-[var(--sparx-muted)]">{campaign.pending_calls} pending | {campaign.active_calls} active | {campaign.failed_calls} failed</p>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : <EmptyState title="No matching campaigns" description="Campaigns will appear here after a validated renewal sheet creates a queue." />}
         </section>
       </PageFrame>
     </AppShell>
@@ -1026,7 +1207,7 @@ export function ManualCallPage({ initialData }: PageDataProps) {
           eyebrow="Manual Call"
           title="Single AI Call"
           actions={
-            <PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh} variant="soft">
+            <PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()} variant="soft">
               Refresh
             </PrimaryButton>
           }
@@ -1377,9 +1558,6 @@ function TranscriptWindow({
             {call ? `${formatDateTime(recordTimestamp(call))} | ${formatDuration(recordDuration(call))}` : "No call selected"}
           </p>
         </div>
-        <PrimaryButton icon={<Folder className="size-4" />} variant="soft">
-          Notes
-        </PrimaryButton>
       </div>
       {transcript.length ? (
         <ScrollPanel className={cn("flex-1 bg-transparent p-0", compact ? "max-h-[430px]" : "max-h-[540px]")}>
@@ -1444,7 +1622,7 @@ export function TranscriptPage({ initialData }: PageDataProps) {
       <PageFrame>
         <PageCanvas
           title="Call Transcript"
-          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh}>Refresh</PrimaryButton>}
+          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>Refresh</PrimaryButton>}
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
           {selectedCallId ? (
@@ -1551,7 +1729,7 @@ export function SummariesPage({ initialData }: PageDataProps) {
       <PageFrame>
         <PageCanvas
           title="Gemini Call Summary"
-          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh}>Refresh</PrimaryButton>}
+          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>Refresh</PrimaryButton>}
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
           <div className="mt-4 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
@@ -1752,16 +1930,612 @@ export function CallbacksPage({ initialData }: PageDataProps) {
     </AppShell>
   );
 }
+const schedulingTimeZones = [
+  "Asia/Kolkata",
+  "UTC",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Berlin",
+  "Asia/Dubai",
+  "Asia/Singapore",
+];
+
+type MeetingFormState = {
+  full_name: string;
+  phone: string;
+  email: string;
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  timezone: string;
+  notes: string;
+};
+
+const initialMeetingForm = (): MeetingFormState => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + 30);
+  const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return {
+    full_name: "",
+    phone: "",
+    email: "",
+    title: "SPARX consultation",
+    description: "",
+    date: localDate,
+    time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
+    notes: "",
+  };
+};
+
+function validateMeetingForm(form: MeetingFormState) {
+  const errors: Partial<Record<keyof MeetingFormState, string>> = {};
+  if (!form.full_name.trim()) errors.full_name = "Full name is required.";
+  if (!phonePattern.test(form.phone.trim())) errors.phone = "Enter a valid phone number.";
+  if (!emailPattern.test(form.email.trim())) errors.email = "Enter a valid email address.";
+  if (!form.title.trim()) errors.title = "Meeting title is required.";
+  if (!form.description.trim()) errors.description = "Meeting description is required.";
+  if (!form.date) errors.date = "Meeting date is required.";
+  if (!form.time) errors.time = "Meeting time is required.";
+  if (!form.timezone.trim()) errors.timezone = "Time zone is required.";
+
+  if (form.date && form.time) {
+    const candidate = new Date(`${form.date}T${form.time}:00`);
+    if (Number.isNaN(candidate.getTime())) {
+      errors.time = "Enter a valid meeting time.";
+    } else if (candidate <= new Date()) {
+      errors.date = "Choose a future meeting date and time.";
+    }
+  }
+
+  return errors;
+}
+
+function meetingFormToPayload(form: MeetingFormState): MeetingCreatePayload {
+  return {
+    full_name: form.full_name.trim(),
+    phone: form.phone.trim(),
+    email: form.email.trim().toLowerCase(),
+    title: form.title.trim(),
+    description: form.description.trim(),
+    scheduled_for: `${form.date}T${form.time}:00`,
+    timezone: form.timezone.trim(),
+    notes: form.notes.trim() || null,
+  };
+}
+
+function SchedulingModal({
+  isOpen,
+  isClosing,
+  onClose,
+  onSubmit,
+  busy,
+  message,
+}: {
+  isOpen: boolean;
+  isClosing: boolean;
+  onClose: () => void;
+  onSubmit: (payload: MeetingCreatePayload) => Promise<void>;
+  busy: boolean;
+  message?: string;
+}) {
+  const [form, setForm] = useState<MeetingFormState>(initialMeetingForm);
+  const [errors, setErrors] = useState<Partial<Record<keyof MeetingFormState, string>>>({});
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const update = <K extends keyof MeetingFormState>(key: K, value: MeetingFormState[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextErrors = validateMeetingForm(form);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      return;
+    }
+    await onSubmit(meetingFormToPayload(form));
+  };
+
+  const fieldError = (key: keyof MeetingFormState) => errors[key]
+    ? <span className="text-xs font-bold text-[var(--sparx-red)]">{errors[key]}</span>
+    : null;
+
+  return (
+    <div className={cn("fixed inset-0 z-50 grid place-items-center bg-black/35 px-4 py-6 backdrop-blur-sm transition duration-200", isClosing ? "opacity-0" : "opacity-100 animate-[sparx-fade-up_180ms_ease-out_both]")}>
+      <form
+        aria-label="Schedule meeting"
+        className={cn("w-[min(760px,92vw)] max-h-[84vh] overflow-auto rounded-[8px] border border-white/70 bg-[var(--sparx-panel)] p-5 shadow-[0_24px_80px_rgba(20,16,8,0.28)] transition duration-200", isClosing ? "translate-y-2 scale-[0.98] opacity-0" : "animate-[sparx-scale-in_220ms_ease-out_both]")}
+        onSubmit={submit}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4 border-b border-[var(--sparx-line)] pb-3">
+          <div>
+            <h3 className="text-2xl font-black">Schedule Meeting</h3>
+            <p className="mt-1 text-sm font-semibold text-[var(--sparx-muted)]">Google Calendar will send the participant invitation and Google Meet link.</p>
+          </div>
+          <button
+            aria-label="Close scheduling modal"
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-[var(--sparx-muted)] transition hover:text-black"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Field label="Full Name" value={form.full_name} onChange={(value) => update("full_name", value)} required />
+            {fieldError("full_name")}
+          </div>
+          <div>
+            <Field label="Phone Number" value={form.phone} onChange={(value) => update("phone", value)} placeholder="+919999999999" required />
+            {fieldError("phone")}
+          </div>
+          <div>
+            <Field label="Email" value={form.email} onChange={(value) => update("email", value)} placeholder="name@example.com" required type="email" />
+            {fieldError("email")}
+          </div>
+          <div>
+            <Field label="Meeting Title" value={form.title} onChange={(value) => update("title", value)} required />
+            {fieldError("title")}
+          </div>
+          <div className="sm:col-span-2">
+            <TextAreaField label="Meeting Description" value={form.description} onChange={(value) => update("description", value)} required />
+            {fieldError("description")}
+          </div>
+          <div>
+            <Field label="Meeting Date" value={form.date} onChange={(value) => update("date", value)} required type="date" />
+            {fieldError("date")}
+          </div>
+          <div>
+            <Field label="Meeting Time" value={form.time} onChange={(value) => update("time", value)} required type="time" />
+            {fieldError("time")}
+          </div>
+          <div className="sm:col-span-2">
+            <SelectField label="Time Zone" value={form.timezone} onChange={(value) => update("timezone", value)}>
+              {Array.from(new Set([form.timezone, ...schedulingTimeZones])).filter(Boolean).map((timezone) => (
+                <option key={timezone} value={timezone}>{timezone}</option>
+              ))}
+            </SelectField>
+            {fieldError("timezone")}
+          </div>
+          <div className="sm:col-span-2">
+            <TextAreaField label="Notes (optional)" value={form.notes} onChange={(value) => update("notes", value)} rows={2} />
+          </div>
+        </div>
+
+        {message ? (
+          <div className="mt-4 rounded-[8px] border border-[var(--sparx-line)] bg-white px-3 py-2 text-sm font-bold text-[var(--sparx-muted)]">
+            {message}
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <PrimaryButton disabled={busy} onClick={onClose} type="button" variant="soft">Cancel</PrimaryButton>
+          <PrimaryButton disabled={busy} icon={busy ? <RefreshCw className="size-4 animate-spin" /> : <CalendarCheck className="size-4" />} type="submit">
+            Schedule Meeting
+          </PrimaryButton>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function meetingTimeBounds(meeting: MeetingRecord) {
   const start = formatTime(meeting.scheduled_for);
   const end = formatTime(meeting.ends_at);
   return end ? `${start} - ${end}` : start;
 }
 
+type CalendarView = "month" | "week" | "day";
+
+const calendarHourHeight = 72;
+const dayNamesShort = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addCalendarDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function addCalendarMonths(date: Date, months: number) {
+  const nextDate = new Date(date);
+  nextDate.setMonth(nextDate.getMonth() + months);
+  return nextDate;
+}
+
+function startOfWeek(date: Date) {
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return addCalendarDays(startOfLocalDay(date), mondayOffset);
+}
+
+function getWeekDates(date: Date) {
+  const firstDay = startOfWeek(date);
+  return Array.from({ length: 7 }, (_, index) => addCalendarDays(firstDay, index));
+}
+
+function sameLocalDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function parseMeetingStart(meeting: MeetingRecord) {
+  const start = new Date(meeting.scheduled_for);
+  return Number.isNaN(start.getTime()) ? null : start;
+}
+
+function parseMeetingEnd(meeting: MeetingRecord) {
+  const start = parseMeetingStart(meeting);
+  if (!start) return null;
+  const explicitEnd = meeting.ends_at ? new Date(meeting.ends_at) : null;
+  if (explicitEnd && !Number.isNaN(explicitEnd.getTime()) && explicitEnd > start) {
+    return explicitEnd;
+  }
+  return new Date(start.getTime() + 60 * 60 * 1000);
+}
+
+function isMeetingExpired(meeting: MeetingRecord) {
+  const end = parseMeetingEnd(meeting);
+  return Boolean(end && end < new Date());
+}
+
+function isMeetingUnavailable(meeting: MeetingRecord) {
+  return meeting.status === "canceled" || meeting.status === "completed" || !meeting.meet_link || isMeetingExpired(meeting);
+}
+
+function meetingJoinUnavailableReason(meeting: MeetingRecord) {
+  if (meeting.status === "canceled") return "Canceled";
+  if (meeting.status === "completed") return "Done";
+  if (isMeetingExpired(meeting)) return "Expired";
+  if (!meeting.meet_link) return "No link";
+  return "Unavailable";
+}
+
+function meetingCategory(meeting: MeetingRecord) {
+  const text = `${meeting.title} ${meeting.description ?? ""}`.toLowerCase();
+  if (/renew|subscription|payment/.test(text)) return "Renewal";
+  if (/support|issue|bug|problem/.test(text)) return "Support";
+  if (/design|creative|brand/.test(text)) return "Design";
+  if (/demo|product|walkthrough/.test(text)) return "Demo";
+  if (/follow|callback|reschedule/.test(text)) return "Follow-up";
+  return "Meeting";
+}
+
+function attendeeInitials(meeting: MeetingRecord) {
+  const labels = [meeting.attendee_name, ...meeting.attendees].filter(Boolean) as string[];
+  const uniqueLabels = [...new Set(labels)].slice(0, 3);
+  const fallback = meeting.title || "Meeting";
+  return (uniqueLabels.length ? uniqueLabels : [fallback]).map((label) => label.trim().charAt(0).toUpperCase() || "M");
+}
+
+function calendarTitle(anchorDate: Date) {
+  return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(anchorDate);
+}
+
+function dateCardLabel(date: Date) {
+  return {
+    weekday: new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(date),
+    day: new Intl.DateTimeFormat("en-IN", { day: "2-digit" }).format(date),
+  };
+}
+
+function getVisibleDates(anchorDate: Date, view: CalendarView) {
+  if (view === "day") return [startOfLocalDay(anchorDate)];
+  if (view === "week") return getWeekDates(anchorDate);
+  const firstOfMonth = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+  const firstGridDate = startOfWeek(firstOfMonth);
+  return Array.from({ length: 42 }, (_, index) => addCalendarDays(firstGridDate, index));
+}
+
+function meetingIntersectsDay(meeting: MeetingRecord, day: Date) {
+  const start = parseMeetingStart(meeting);
+  const end = parseMeetingEnd(meeting);
+  if (!start || !end) return false;
+  const dayStart = startOfLocalDay(day);
+  const dayEnd = addCalendarDays(dayStart, 1);
+  return start < dayEnd && end > dayStart;
+}
+
+function getCalendarHourBounds(meetings: MeetingRecord[], visibleDates: Date[]) {
+  const relevantMeetings = meetings.filter((meeting) => visibleDates.some((date) => meetingIntersectsDay(meeting, date)));
+  const starts = relevantMeetings.map(parseMeetingStart).filter(Boolean) as Date[];
+  const ends = relevantMeetings.map(parseMeetingEnd).filter(Boolean) as Date[];
+  const minHour = Math.min(8, ...starts.map((date) => date.getHours()));
+  const maxHour = Math.max(18, ...ends.map((date) => date.getHours() + (date.getMinutes() > 0 ? 1 : 0)));
+  return {
+    startHour: Math.max(0, minHour),
+    endHour: Math.min(24, Math.max(minHour + 1, maxHour)),
+  };
+}
+
+function layoutMeetingsForDay(meetings: MeetingRecord[], day: Date, startHour: number, endHour: number) {
+  type CalendarLayoutItem = {
+    meeting: MeetingRecord;
+    start: Date;
+    end: Date;
+    lane: number;
+    laneCount: number;
+  };
+
+  const dayStart = startOfLocalDay(day);
+  const dayEnd = addCalendarDays(dayStart, 1);
+  const visibleStart = new Date(dayStart);
+  visibleStart.setHours(startHour, 0, 0, 0);
+  const visibleEnd = new Date(dayStart);
+  visibleEnd.setHours(endHour, 0, 0, 0);
+
+  const items = meetings
+    .map((meeting) => {
+      const rawStart = parseMeetingStart(meeting);
+      const rawEnd = parseMeetingEnd(meeting);
+      if (!rawStart || !rawEnd || rawStart >= dayEnd || rawEnd <= dayStart) return null;
+      const start = rawStart < visibleStart ? visibleStart : rawStart;
+      const end = rawEnd > visibleEnd ? visibleEnd : rawEnd;
+      if (end <= visibleStart || start >= visibleEnd) return null;
+      return { meeting, start, end, lane: 0, laneCount: 1 };
+    })
+    .filter((item): item is CalendarLayoutItem => item !== null)
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  const laneEnds: number[] = [];
+  items.forEach((item) => {
+    const lane = laneEnds.findIndex((endTime) => item.start.getTime() >= endTime);
+    const selectedLane = lane >= 0 ? lane : laneEnds.length;
+    item.lane = selectedLane;
+    laneEnds[selectedLane] = item.end.getTime();
+  });
+  const laneCount = Math.max(1, laneEnds.length);
+  return items.map((item) => ({ ...item, laneCount }));
+}
+
+function MeetingAvatarStack({ meeting }: { meeting: MeetingRecord }) {
+  return (
+    <div className="flex -space-x-2">
+      {attendeeInitials(meeting).map((initial, index) => (
+        <span
+          className="grid size-6 place-items-center rounded-full border-2 border-white bg-[var(--sparx-panel)] text-[10px] font-black text-[var(--sparx-olive)]"
+          key={`${meeting.meeting_id}-${initial}-${index}`}
+        >
+          {initial}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CalendarToolbar({
+  anchorDate,
+  view,
+  onChangeView,
+  onMove,
+  onToday,
+}: {
+  anchorDate: Date;
+  view: CalendarView;
+  onChangeView: (view: CalendarView) => void;
+  onMove: (direction: -1 | 1) => void;
+  onToday: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <h3 className="text-lg font-black">{calendarTitle(anchorDate)}</h3>
+        <button className="rounded-full bg-[var(--sparx-card-strong)] px-4 py-2 text-xs font-black text-[var(--sparx-olive)]" onClick={onToday} type="button">
+          Today
+        </button>
+        <div className="flex items-center gap-1">
+          <button className="grid size-8 place-items-center rounded-full text-[var(--sparx-muted)] hover:bg-[var(--sparx-panel)]" onClick={() => onMove(-1)} type="button">
+            <ChevronLeft className="size-4" />
+          </button>
+          <button className="grid size-8 place-items-center rounded-full text-[var(--sparx-muted)] hover:bg-[var(--sparx-panel)]" onClick={() => onMove(1)} type="button">
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      </div>
+      <div className="inline-flex rounded-full bg-[var(--sparx-panel)] p-1">
+        {(["month", "week", "day"] as CalendarView[]).map((mode) => (
+          <button
+            className={cn(
+              "rounded-full px-4 py-2 text-xs font-black capitalize text-[var(--sparx-muted)]",
+              view === mode && "bg-white text-[var(--sparx-ink)] shadow-sm",
+            )}
+            key={mode}
+            onClick={() => onChangeView(mode)}
+            type="button"
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthCalendar({ anchorDate, meetings }: { anchorDate: Date; meetings: MeetingRecord[] }) {
+  const visibleDates = getVisibleDates(anchorDate, "month");
+  const today = new Date();
+  return (
+    <div className="mt-4 grid gap-2">
+      <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-black uppercase text-[var(--sparx-muted)]">
+        {dayNamesShort.map((day) => <span key={day}>{day}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-2">
+        {visibleDates.map((date) => {
+          const dayMeetings = meetings.filter((meeting) => meetingIntersectsDay(meeting, date));
+          const isCurrentMonth = date.getMonth() === anchorDate.getMonth();
+          return (
+            <div
+              className={cn(
+                "min-h-28 rounded-[8px] border border-[var(--sparx-line)] bg-white/80 p-2",
+                !isCurrentMonth && "opacity-40",
+                sameLocalDay(date, today) && "border-[var(--sparx-yellow)]",
+              )}
+              key={date.toISOString()}
+            >
+              <div className="mb-2 text-sm font-black">{date.getDate()}</div>
+              <div className="grid gap-1">
+                {dayMeetings.slice(0, 3).map((meeting) => (
+                  <div className="truncate rounded-[6px] bg-[var(--sparx-card-strong)] px-2 py-1 text-[11px] font-black" key={meeting.meeting_id}>
+                    {formatTime(meeting.scheduled_for)} {meeting.attendee_name || meeting.title}
+                  </div>
+                ))}
+                {dayMeetings.length > 3 ? <span className="text-[11px] font-bold text-[var(--sparx-muted)]">+{dayMeetings.length - 3} more</span> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TimeGridCalendar({
+  view,
+  anchorDate,
+  meetings,
+  onCreate,
+}: {
+  view: "week" | "day";
+  anchorDate: Date;
+  meetings: MeetingRecord[];
+  onCreate: () => void;
+}) {
+  const visibleDates = getVisibleDates(anchorDate, view);
+  const { startHour, endHour } = getCalendarHourBounds(meetings, visibleDates);
+  const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index);
+  const gridHeight = (endHour - startHour) * calendarHourHeight;
+  const today = new Date();
+
+  return (
+    <div className="mt-4 overflow-x-auto pb-2">
+      <div className="min-w-[720px]">
+        <div className="grid gap-2" style={{ gridTemplateColumns: `72px repeat(${visibleDates.length}, minmax(120px, 1fr))` }}>
+          <button className="rounded-[8px] bg-[var(--sparx-panel)] py-4 text-xs font-black text-[var(--sparx-olive)] transition hover:bg-[var(--sparx-card)] active:scale-[0.98]" onClick={onCreate} type="button">
+            + Create
+          </button>
+          {visibleDates.map((date) => {
+            const label = dateCardLabel(date);
+            return (
+              <div
+                className={cn(
+                  "rounded-[8px] border border-[var(--sparx-line)] bg-white px-3 py-3 text-center",
+                  sameLocalDay(date, today) && "bg-[var(--sparx-panel)]",
+                )}
+                key={date.toISOString()}
+              >
+                <div className="text-[11px] font-black uppercase text-[var(--sparx-muted)]">{label.weekday}</div>
+                <div className="text-xl font-black">{label.day}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 grid gap-2" style={{ gridTemplateColumns: `72px repeat(${visibleDates.length}, minmax(120px, 1fr))` }}>
+          <div className="relative" style={{ height: gridHeight }}>
+            {hours.slice(0, -1).map((hour, index) => (
+              <span className="absolute text-xs font-bold text-[var(--sparx-muted)]" key={hour} style={{ top: index * calendarHourHeight - 2 }}>
+                {new Intl.DateTimeFormat("en-IN", { hour: "numeric" }).format(new Date(2026, 0, 1, hour))}
+              </span>
+            ))}
+          </div>
+          {visibleDates.map((date) => {
+            const laidOutMeetings = layoutMeetingsForDay(meetings, date, startHour, endHour);
+            return (
+              <div className="relative rounded-[8px] bg-white/60" key={date.toISOString()} style={{ height: gridHeight }}>
+                {hours.slice(0, -1).map((hour, index) => (
+                  <div className="absolute left-0 right-0 border-t border-dashed border-[var(--sparx-line)]" key={hour} style={{ top: index * calendarHourHeight }} />
+                ))}
+                {laidOutMeetings.map(({ meeting, start, end, lane, laneCount }) => {
+                  const top = ((start.getHours() + start.getMinutes() / 60) - startHour) * calendarHourHeight;
+                  const height = Math.max(54, ((end.getTime() - start.getTime()) / 3600000) * calendarHourHeight);
+                  const width = `calc(${100 / laneCount}% - 6px)`;
+                  const left = `calc(${(100 / laneCount) * lane}% + 3px)`;
+                  return (
+                    <article
+                      className="absolute overflow-hidden rounded-[8px] bg-[var(--sparx-panel)] p-3 shadow-sm"
+                      key={meeting.meeting_id}
+                      style={{ top, height, left, width }}
+                      title={`${meeting.title} ${meetingTimeBounds(meeting)}`}
+                    >
+                      <div className="truncate text-xs font-black">{meetingCategory(meeting)}</div>
+                      <div className="truncate text-[11px] font-bold text-[var(--sparx-muted)]">{meetingTimeBounds(meeting)}</div>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <MeetingAvatarStack meeting={meeting} />
+                        <span className="truncate text-[11px] font-black">{meeting.attendee_name || meeting.title}</span>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MeetingsCalendar({ meetings, onCreate }: { meetings: MeetingRecord[]; onCreate: () => void }) {
+  const [view, setView] = useState<CalendarView>("week");
+  const [anchorDate, setAnchorDate] = useState(() => startOfLocalDay(new Date()));
+
+  function moveCalendar(direction: -1 | 1) {
+    setAnchorDate((current) => {
+      if (view === "month") return addCalendarMonths(current, direction);
+      if (view === "week") return addCalendarDays(current, direction * 7);
+      return addCalendarDays(current, direction);
+    });
+  }
+
+  return (
+    <div className="rounded-[8px] bg-white/80 p-4">
+      <CalendarToolbar
+        anchorDate={anchorDate}
+        onChangeView={setView}
+        onMove={moveCalendar}
+        onToday={() => setAnchorDate(startOfLocalDay(new Date()))}
+        view={view}
+      />
+      {view === "month" ? (
+        <MonthCalendar anchorDate={anchorDate} meetings={meetings} />
+      ) : (
+        <TimeGridCalendar anchorDate={anchorDate} meetings={meetings} onCreate={onCreate} view={view} />
+      )}
+    </div>
+  );
+}
+
 export function MeetingsPage({ initialData }: PageDataProps) {
   const { data, status, error, refresh } = usePlatformData(initialData);
   const meetings = data?.meetings ?? emptyMeetings;
   const [message, setMessage] = useState("");
+  const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
+  const [isSchedulingClosing, setIsSchedulingClosing] = useState(false);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
 
   async function runAction(action: Promise<unknown>, success: string) {
     setMessage("Updating meetings...");
@@ -1774,6 +2548,45 @@ export function MeetingsPage({ initialData }: PageDataProps) {
     }
   }
 
+  async function handleCreateMeeting(payload: MeetingCreatePayload) {
+    if (scheduleBusy) {
+      return;
+    }
+    setScheduleBusy(true);
+    setMessage("Scheduling meeting...");
+    try {
+      const createdMeeting = await services.createMeeting(payload);
+      setMessage(
+        createdMeeting.meet_link
+          ? "Meeting scheduled. Google Calendar sent the invite with the Google Meet link."
+          : "Meeting scheduled, but the Google Meet link was not returned.",
+      );
+      closeSchedulingModal();
+      await refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Unable to schedule meeting.");
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  function openSchedulingModal() {
+    setMessage("");
+    setIsSchedulingClosing(false);
+    setIsSchedulingOpen(true);
+  }
+
+  function closeSchedulingModal() {
+    if (scheduleBusy) {
+      return;
+    }
+    setIsSchedulingClosing(true);
+    window.setTimeout(() => {
+      setIsSchedulingOpen(false);
+      setIsSchedulingClosing(false);
+    }, 180);
+  }
+
   return (
     <AppShell>
       <GreetingHeader />
@@ -1784,9 +2597,17 @@ export function MeetingsPage({ initialData }: PageDataProps) {
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
           {message ? <p className="mt-2 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
-          <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(360px,0.85fr)_minmax(560px,1.15fr)]">
             <section className="grid gap-4">
-              <AssetFrame className="min-h-[190px] bg-[linear-gradient(135deg,#f7d674,#c99b25)] text-white" title="Secured meetings image frame" description="Reserved for the yellow meeting asset from Figma." />
+              <div className="overflow-hidden rounded-[8px] bg-[var(--sparx-card-strong)]">
+                <Image
+                  alt="Secured meetings"
+                  className="h-full min-h-[190px] w-full object-cover"
+                  height={760}
+                  src="/sparx-assets/secured-meetings.svg"
+                  width={1866}
+                />
+              </div>
               <div className="rounded-[8px] bg-[var(--sparx-card-strong)] p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-lg font-black">Secured Meetings</h3>
@@ -1805,11 +2626,15 @@ export function MeetingsPage({ initialData }: PageDataProps) {
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {meeting.meet_link ? (
-                            <a className="inline-flex min-h-10 items-center rounded-full bg-[var(--sparx-olive)] px-5 text-sm font-black text-white" href={meeting.meet_link} rel="noreferrer" target="_blank">
-                              Open Teams <ArrowUpRight className="ml-2 size-4" />
+                          {meeting.meet_link && !isMeetingUnavailable(meeting) ? (
+                            <a className="inline-flex min-h-10 items-center rounded-full bg-[var(--sparx-olive)] px-5 text-sm font-black text-white transition hover:bg-[var(--sparx-olive-dark)] active:scale-[0.98]" href={meeting.meet_link} rel="noreferrer" target="_blank">
+                              Join <ArrowUpRight className="ml-2 size-4" />
                             </a>
-                          ) : null}
+                          ) : (
+                            <span className="inline-flex min-h-10 items-center rounded-full bg-white px-4 text-xs font-black text-[var(--sparx-muted)] ring-1 ring-[var(--sparx-line-strong)]" title={meetingJoinUnavailableReason(meeting)}>
+                              {meetingJoinUnavailableReason(meeting)}
+                            </span>
+                          )}
                           <PrimaryButton onClick={() => void runAction(services.markMeetingDone(meeting.meeting_id), "Meeting marked done.")} variant="soft">
                             Done
                           </PrimaryButton>
@@ -1825,10 +2650,18 @@ export function MeetingsPage({ initialData }: PageDataProps) {
                 )}
               </div>
             </section>
-            <AssetFrame className="min-h-[520px] bg-white/70" title="Calendar layout frame" description="Reserved for the full calendar illustration/table from Figma." />
+            <MeetingsCalendar meetings={meetings} onCreate={openSchedulingModal} />
           </div>
         </PageCanvas>
       </PageFrame>
+      <SchedulingModal
+        busy={scheduleBusy}
+        isClosing={isSchedulingClosing}
+        isOpen={isSchedulingOpen}
+        message={message}
+        onClose={closeSchedulingModal}
+        onSubmit={handleCreateMeeting}
+      />
     </AppShell>
   );
 }
@@ -1888,6 +2721,12 @@ export function ImportsPage({ initialData }: PageDataProps) {
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!isSupportedRenewalFile(file)) {
+      setPreview(null);
+      setMessage("Unsupported file. Upload a CSV, XLSX, or XLS renewal sheet.");
+      event.target.value = "";
+      return;
+    }
     setMessage("Checking import file...");
     try {
       const nextPreview = await services.previewLeads(file);
@@ -1918,18 +2757,18 @@ export function ImportsPage({ initialData }: PageDataProps) {
       <PageFrame>
         <PageCanvas
           title="Import and queue"
-          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={refresh}>Refresh</PrimaryButton>}
+          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>Refresh</PrimaryButton>}
         >
-          <p className="text-sm font-semibold text-[var(--sparx-muted)]">Upload content, manage your queue, and track your imports.</p>
+          <p className="text-sm font-semibold text-[var(--sparx-muted)]">Upload CSV or Excel renewal sheets, manage your queue, and track imports.</p>
           <DataNotice status={status} error={error} errors={data?.errors} />
           {message ? <p className="mt-2 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
           <section className="mt-4 grid gap-5 xl:grid-cols-2">
             <label className="grid min-h-[190px] cursor-pointer place-items-center rounded-[8px] border border-dashed border-[var(--sparx-line-strong)] bg-white/70 p-5 text-center">
-              <input accept=".csv,.xlsx,.xls,.pdf,.doc,.docx,.txt" className="sr-only" onChange={handleFile} type="file" />
+              <input accept=".csv,.xlsx,.xls" className="sr-only" onChange={handleFile} type="file" />
               <span>
                 <Upload className="mx-auto size-10 text-[var(--sparx-olive)]" />
-                <strong className="mt-3 block text-lg font-black">Drag & drop images, videos, or any file</strong>
-                <span className="mt-1 block text-sm font-semibold text-[var(--sparx-muted)]">or browse files on your computer</span>
+                <strong className="mt-3 block text-lg font-black">Drag & drop CSV or Excel files</strong>
+                <span className="mt-1 block text-sm font-semibold text-[var(--sparx-muted)]">Supported formats: CSV, XLSX, XLS</span>
                 <span className="mt-4 inline-flex min-h-10 items-center rounded-full bg-[var(--sparx-olive)] px-6 text-sm font-black text-white">Upload</span>
               </span>
             </label>

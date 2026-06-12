@@ -7,6 +7,8 @@ from typing import Any
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token as google_id_token
 
 from app.config.settings import Settings, get_settings
 from app.core.errors import AppError
@@ -65,6 +67,8 @@ class FirebaseAuthService:
 
     def verify_id_token(self, token: str) -> AuthenticatedUser:
         if not self.is_configured:
+            if self.settings.firebase_auth_project_id:
+                return self._verify_id_token_with_public_keys(token)
             raise AppError(
                 status_code=503,
                 code="firebase_auth_not_configured",
@@ -77,13 +81,36 @@ class FirebaseAuthService:
                 check_revoked=True,
             )
         except Exception as exc:
-            raise AppError(
-                status_code=401,
-                code="auth_invalid_token",
-                message="The Firebase session is invalid or expired. Please sign in again.",
-                details={"error": str(exc)},
-            ) from exc
+            if self.settings.firebase_auth_project_id:
+                return self._verify_id_token_with_public_keys(token)
+            raise self._invalid_token_error(exc) from exc
 
+        return self._build_authenticated_user(decoded)
+
+    def _verify_id_token_with_public_keys(self, token: str) -> AuthenticatedUser:
+        project_id = self.settings.firebase_auth_project_id
+        if not project_id:
+            raise AppError(
+                status_code=503,
+                code="firebase_auth_not_configured",
+                message="Firebase authentication is not configured on the server.",
+            )
+        try:
+            decoded = google_id_token.verify_token(
+                token,
+                GoogleAuthRequest(),
+                audience=project_id,
+                certs_url="https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+            )
+            expected_issuer = f"https://securetoken.google.com/{project_id}"
+            if decoded.get("iss") != expected_issuer:
+                raise ValueError("Firebase token issuer does not match the configured project.")
+        except Exception as exc:
+            raise self._invalid_token_error(exc) from exc
+
+        return self._build_authenticated_user(decoded)
+
+    def _build_authenticated_user(self, decoded: dict[str, Any]) -> AuthenticatedUser:
         email_verified = bool(decoded.get("email_verified"))
         if self.settings.auth_require_verified_email and not email_verified:
             raise AppError(
@@ -104,6 +131,15 @@ class FirebaseAuthService:
             sign_in_provider=sign_in_provider,
             role=role,
             claims=decoded,
+        )
+
+    @staticmethod
+    def _invalid_token_error(exc: Exception) -> AppError:
+        return AppError(
+            status_code=401,
+            code="auth_invalid_token",
+            message="The Firebase session is invalid or expired. Please sign in again.",
+            details={"error": str(exc)},
         )
 
     def _build_credentials(self):

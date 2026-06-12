@@ -379,6 +379,12 @@ class PostCallIntelligenceService:
         meeting_invite = call_document.metadata.get("meeting_invite")
         if not isinstance(meeting_invite, dict):
             return True
+        if (
+            meeting_invite.get("status") == "sent"
+            and meeting_invite.get("meet_link")
+            and normalize_email(meeting_invite.get("attendee_email")) == normalize_email(resolved_email)
+        ):
+            return False
         email_result = meeting_invite.get("email")
         if not isinstance(email_result, dict):
             return True
@@ -520,19 +526,22 @@ class PostCallIntelligenceService:
                 "error_message": str(exc),
                 "recipient": call_document.email,
             }
+        calendar_delivered = calendar_result.get("status") == "sent" and bool(meeting_payload.get("meet_link"))
+        email_delivered = email_result.get("status") == "sent" and bool(meeting_payload.get("meet_link"))
+        delivery_sent = calendar_delivered or email_delivered
         metadata["meeting_invite"] = {
             **meeting_payload,
             "calendar": calendar_result,
             "email": email_result,
-            "status": "sent" if email_result.get("status") == "sent" else "failed",
-            "sent_at": utc_now_iso() if email_result.get("status") == "sent" else None,
-            "failed_at": utc_now_iso() if email_result.get("status") != "sent" else None,
+            "status": "sent" if delivery_sent else "failed",
+            "sent_at": utc_now_iso() if delivery_sent else None,
+            "failed_at": utc_now_iso() if not delivery_sent else None,
             "source": "post_call_ai",
         }
         updates = {
             "metadata": metadata,
-            "meeting_booked": email_result.get("status") == "sent",
-            "conversation_stage": "MEETING_BOOKED" if email_result.get("status") == "sent" else call_document.conversation_stage,
+            "meeting_booked": delivery_sent,
+            "conversation_stage": "MEETING_BOOKED" if delivery_sent else call_document.conversation_stage,
         }
 
         return await run_in_threadpool(
@@ -546,6 +555,12 @@ class PostCallIntelligenceService:
         existing_invite = call_document.metadata.get("meeting_invite")
         if not isinstance(existing_invite, dict):
             return False
+        if (
+            existing_invite.get("status") == "sent"
+            and normalize_email(existing_invite.get("attendee_email")) == normalize_email(call_document.email)
+            and existing_invite.get("meet_link")
+        ):
+            return True
         email_result = existing_invite.get("email")
         if not isinstance(email_result, dict):
             return False

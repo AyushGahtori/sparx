@@ -41,7 +41,7 @@ class CallbackRepository:
         self.mongo_fallback_service.upsert(self.collection_name, callback_document.callback_id, payload)
         return self.get_callback(callback_document.callback_id)
 
-    def get_callback(self, callback_id: str) -> CallbackDocument:
+    def get_callback(self, callback_id: str, *, owner_user_id: str | None = None) -> CallbackDocument:
         try:
             snapshot = self._collection().document(callback_id).get(
                 timeout=self.firestore_service.operation_timeout_seconds,
@@ -56,15 +56,23 @@ class CallbackRepository:
             payload.setdefault("callback_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             self.mongo_fallback_service.upsert(self.collection_name, callback_id, payload)
-            return CallbackDocument.model_validate(payload)
+            callback_document = CallbackDocument.model_validate(payload)
+            scoped_callback = self._scope_or_adopt(callback_document, owner_user_id)
+            if scoped_callback is None:
+                raise AppError(
+                    status_code=404,
+                    code="callback_not_found",
+                    message=f"Callback '{callback_id}' was not found.",
+                )
+            return scoped_callback
         except AppError as exc:
             if exc.code not in {"firestore_not_configured", "callback_not_found"}:
                 raise
-            return self._get_callback_from_mongo_or_raise(callback_id)
+            return self._get_callback_from_mongo_or_raise(callback_id, owner_user_id=owner_user_id)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            return self._get_callback_from_mongo_or_raise(callback_id)
+            return self._get_callback_from_mongo_or_raise(callback_id, owner_user_id=owner_user_id)
 
     def list_callbacks(
         self,
@@ -74,6 +82,7 @@ class CallbackRepository:
         source: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        owner_user_id: str | None = None,
     ) -> list[CallbackDocument]:
         callbacks: list[CallbackDocument] = []
         try:
@@ -94,6 +103,10 @@ class CallbackRepository:
             payload.setdefault("callback_id", payload.get("callback_id") or payload.get("_id"))
             payload.setdefault("id", payload.get("id") or payload.get("_id"))
             callback_document = CallbackDocument.model_validate(payload)
+            scoped_callback = self._scope_or_adopt(callback_document, owner_user_id)
+            if scoped_callback is None:
+                continue
+            callback_document = scoped_callback
 
             if status and callback_document.status != status:
                 continue
@@ -208,7 +221,7 @@ class CallbackRepository:
                 raise
         self.mongo_fallback_service.delete(self.collection_name, callback_id)
 
-    def _get_callback_from_mongo_or_raise(self, callback_id: str) -> CallbackDocument:
+    def _get_callback_from_mongo_or_raise(self, callback_id: str, *, owner_user_id: str | None = None) -> CallbackDocument:
         payload = self.mongo_fallback_service.get(self.collection_name, callback_id)
         if not payload:
             raise AppError(
@@ -218,7 +231,29 @@ class CallbackRepository:
             )
         payload.setdefault("callback_id", callback_id)
         payload.setdefault("id", callback_id)
-        return CallbackDocument.model_validate(payload)
+        callback_document = CallbackDocument.model_validate(payload)
+        scoped_callback = self._scope_or_adopt(callback_document, owner_user_id)
+        if scoped_callback is None:
+            raise AppError(status_code=404, code="callback_not_found", message=f"Callback '{callback_id}' was not found.")
+        return scoped_callback
+
+    def _scope_or_adopt(self, callback_document: CallbackDocument, owner_user_id: str | None) -> CallbackDocument | None:
+        if not owner_user_id:
+            return callback_document
+        if callback_document.owner_user_id and callback_document.owner_user_id != owner_user_id:
+            return None
+        if not callback_document.owner_user_id:
+            callback_document.owner_user_id = owner_user_id
+            try:
+                self._collection().document(callback_document.callback_id).set(
+                    {"owner_user_id": owner_user_id, "updated_at": utc_now()},
+                    merge=True,
+                    timeout=self.firestore_service.operation_timeout_seconds,
+                )
+            except Exception:
+                pass
+            self.mongo_fallback_service.upsert(self.collection_name, callback_document.callback_id, {"owner_user_id": owner_user_id, "updated_at": utc_now()})
+        return callback_document
 
 
 def get_callback_repository() -> CallbackRepository:

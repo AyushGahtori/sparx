@@ -83,3 +83,28 @@ def test_existing_calendar_event_description_is_cleared_from_customer_invite(mon
     assert result["description"] == ""
     assert patch_mock.call_args.kwargs["json"] == {"description": ""}
     assert patch_mock.call_args.kwargs["params"] == {"sendUpdates": "none"}
+
+
+def test_create_meet_event_sends_attendee_updates(monkeypatch):
+    service = GoogleCalendarService(Settings(), token_store=Mock())
+    credentials = SimpleNamespace(token="access-token")
+    meeting_details = service.build_meeting_details(build_call(summary=None))
+    created_event = {
+        "id": "event_123",
+        "htmlLink": "https://calendar.google.com/event",
+        "hangoutLink": "https://meet.google.com/abc-defg-hij",
+    }
+    post_mock = Mock(return_value=httpx.Response(200, json=created_event))
+    client_context = MagicMock()
+    client_context.__enter__.return_value = SimpleNamespace(post=post_mock)
+    monkeypatch.setattr(httpx, "Client", Mock(return_value=client_context))
+
+    result = service._create_meet_event(
+        credentials,
+        meeting_details,
+        extended_private_properties={"sparx_call_id": "call_description_test"},
+    )
+
+    assert result["id"] == "event_123"
+    assert post_mock.call_args.kwargs["params"] == {"conferenceDataVersion": "1", "sendUpdates": "all"}
+    assert post_mock.call_args.kwargs["json"]["attendees"] == [{"email": "2024270213.navin@pg.sharda.ac.in", "displayName": "Navin"}]

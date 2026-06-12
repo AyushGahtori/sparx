@@ -1,9 +1,23 @@
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api";
+const DEFAULT_API_BASE_URL = "/api/backend";
 
 export const apiConfig = {
   baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL,
   timeoutMs: Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS ?? 120000),
 } as const;
+
+async function getAuthHeader() {
+  const headers = new Headers();
+  if (typeof window === "undefined") {
+    return headers;
+  }
+  const { getFirebaseAuth } = await import("@/lib/firebase");
+  const user = getFirebaseAuth().currentUser;
+  if (!user) {
+    return headers;
+  }
+  headers.set("Authorization", `Bearer ${await user.getIdToken()}`);
+  return headers;
+}
 
 export async function apiRequest<T>(
   path: string,
@@ -16,13 +30,16 @@ export async function apiRequest<T>(
 
   try {
     const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+    const authHeader = await getAuthHeader();
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    authHeader.forEach((value, key) => headers.set(key, value));
+    if (init.body && !isFormData) {
+      headers.set("Content-Type", "application/json");
+    }
     const response = await fetch(`${apiConfig.baseUrl}${path}`, {
       ...init,
-      headers: {
-        Accept: "application/json",
-        ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-        ...init.headers,
-      },
+      headers,
       signal: controller.signal,
     });
 

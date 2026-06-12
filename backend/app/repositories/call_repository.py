@@ -44,7 +44,7 @@ class CallRepository:
         self._publish_call("upsert", created_call)
         return created_call
 
-    def get_call(self, call_id: str) -> CallDocument:
+    def get_call(self, call_id: str, *, owner_user_id: str | None = None) -> CallDocument:
         try:
             snapshot = self._collection().document(call_id).get(
                 timeout=self.firestore_service.operation_timeout_seconds,
@@ -59,15 +59,23 @@ class CallRepository:
             payload.setdefault("call_id", snapshot.id)
             payload.setdefault("id", snapshot.id)
             self.mongo_fallback_service.upsert(self.collection_name, call_id, payload)
-            return CallDocument.model_validate(payload)
+            call_document = CallDocument.model_validate(payload)
+            scoped_call = self._scope_or_adopt(call_document, owner_user_id)
+            if scoped_call is None:
+                raise AppError(
+                    status_code=404,
+                    code="call_not_found",
+                    message=f"Call '{call_id}' was not found.",
+                )
+            return scoped_call
         except AppError as exc:
             if exc.code not in {"firestore_not_configured", "call_not_found"}:
                 raise
-            return self._get_call_from_mongo_or_raise(call_id)
+            return self._get_call_from_mongo_or_raise(call_id, owner_user_id=owner_user_id)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
-            return self._get_call_from_mongo_or_raise(call_id)
+            return self._get_call_from_mongo_or_raise(call_id, owner_user_id=owner_user_id)
 
     def update_call(self, call_id: str, updates: dict[str, Any]) -> CallDocument:
         updates = {**updates, "updated_at": utc_now()}
@@ -86,7 +94,7 @@ class CallRepository:
         self._publish_call("upsert", updated_call)
         return updated_call
 
-    def list_calls(self) -> list[CallDocument]:
+    def list_calls(self, *, owner_user_id: str | None = None) -> list[CallDocument]:
         calls: list[CallDocument] = []
         try:
             for snapshot in self._collection().stream(timeout=self.firestore_service.operation_timeout_seconds):
@@ -94,7 +102,10 @@ class CallRepository:
                 payload.setdefault("call_id", snapshot.id)
                 payload.setdefault("id", snapshot.id)
                 self.mongo_fallback_service.upsert(self.collection_name, snapshot.id, payload)
-                calls.append(CallDocument.model_validate(payload))
+                call_document = CallDocument.model_validate(payload)
+                scoped_call = self._scope_or_adopt(call_document, owner_user_id)
+                if scoped_call is not None:
+                    calls.append(scoped_call)
         except Exception as exc:
             if not should_use_mongo_fallback(exc):
                 raise
@@ -102,11 +113,14 @@ class CallRepository:
             for payload in fallback_payloads:
                 payload.setdefault("call_id", payload.get("_id"))
                 payload.setdefault("id", payload.get("_id"))
-                calls.append(CallDocument.model_validate(payload))
+                call_document = CallDocument.model_validate(payload)
+                scoped_call = self._scope_or_adopt(call_document, owner_user_id)
+                if scoped_call is not None:
+                    calls.append(scoped_call)
         calls.sort(key=lambda call: coerce_utc(call.created_at or utc_now()), reverse=True)
         return calls
 
-    def find_recent_duplicate_individual_call(self, phone: str, *, within_minutes: int) -> CallDocument | None:
+    def find_recent_duplicate_individual_call(self, phone: str, *, within_minutes: int, owner_user_id: str | None = None) -> CallDocument | None:
         cutoff = utc_now() - timedelta(minutes=within_minutes)
         duplicate_candidates: list[CallDocument] = []
         try:
@@ -135,6 +149,10 @@ class CallRepository:
             payload.setdefault("call_id", payload.get("call_id") or payload.get("_id"))
             payload.setdefault("id", payload.get("id") or payload.get("_id"))
             call_document = CallDocument.model_validate(payload)
+            scoped_call = self._scope_or_adopt(call_document, owner_user_id)
+            if scoped_call is None:
+                continue
+            call_document = scoped_call
             if call_document.callback_id:
                 continue
             if coerce_utc(call_document.created_at or utc_now()) < cutoff:
@@ -255,13 +273,35 @@ class CallRepository:
         }
         return self.update_call(call_id, {"metadata": metadata})
 
-    def _get_call_from_mongo_or_raise(self, call_id: str) -> CallDocument:
+    def _get_call_from_mongo_or_raise(self, call_id: str, *, owner_user_id: str | None = None) -> CallDocument:
         payload = self.mongo_fallback_service.get(self.collection_name, call_id)
         if not payload:
             raise AppError(status_code=404, code="call_not_found", message=f"Call '{call_id}' was not found.")
         payload.setdefault("call_id", call_id)
         payload.setdefault("id", call_id)
-        return CallDocument.model_validate(payload)
+        call_document = CallDocument.model_validate(payload)
+        scoped_call = self._scope_or_adopt(call_document, owner_user_id)
+        if scoped_call is None:
+            raise AppError(status_code=404, code="call_not_found", message=f"Call '{call_id}' was not found.")
+        return scoped_call
+
+    def _scope_or_adopt(self, call_document: CallDocument, owner_user_id: str | None) -> CallDocument | None:
+        if not owner_user_id:
+            return call_document
+        if call_document.owner_user_id and call_document.owner_user_id != owner_user_id:
+            return None
+        if not call_document.owner_user_id:
+            call_document.owner_user_id = owner_user_id
+            try:
+                self._collection().document(call_document.call_id).set(
+                    {"owner_user_id": owner_user_id, "updated_at": utc_now()},
+                    merge=True,
+                    timeout=self.firestore_service.operation_timeout_seconds,
+                )
+            except Exception:
+                pass
+            self.mongo_fallback_service.upsert(self.collection_name, call_document.call_id, {"owner_user_id": owner_user_id, "updated_at": utc_now()})
+        return call_document
 
     def _get_call_by_twilio_sid_from_mongo(self, twilio_call_sid: str) -> CallDocument | None:
         items = self.mongo_fallback_service.list(self.collection_name, {"twilio_call_sid": twilio_call_sid})

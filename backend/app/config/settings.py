@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     )
 
     firebase_credentials_path: str | None = Field(default=None, alias="FIREBASE_CREDENTIALS_PATH")
+    firebase_auth_project_id: str | None = Field(default=None, alias="FIREBASE_AUTH_PROJECT_ID")
     firebase_project_id: str | None = Field(default=None, alias="FIREBASE_PROJECT_ID")
     firebase_private_key: SecretStr | None = Field(default=None, alias="FIREBASE_PRIVATE_KEY")
     firebase_client_email: str | None = Field(default=None, alias="FIREBASE_CLIENT_EMAIL")
