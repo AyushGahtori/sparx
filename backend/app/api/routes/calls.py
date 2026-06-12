@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.schemas.call import (
     CallDeleteResponse,
@@ -22,18 +22,25 @@ from app.services.post_call_intelligence_service import (
 router = APIRouter(prefix="/calls")
 
 
+def request_owner_uid(request: Request) -> str | None:
+    user = getattr(request.state, "user", None)
+    return getattr(user, "uid", None)
+
+
 @router.get("", response_model=list[CallResponse])
 async def list_calls(
+    request: Request,
     call_service: CallService = Depends(get_call_service),
 ) -> list[CallResponse]:
-    return await call_service.list_calls()
+    return await call_service.list_calls(owner_user_id=request_owner_uid(request))
 
 
 @router.get("/recordings", response_model=list[CallResponse])
 async def list_call_recordings(
+    request: Request,
     call_service: CallService = Depends(get_call_service),
 ) -> list[CallResponse]:
-    return await call_service.list_recorded_calls()
+    return await call_service.list_recorded_calls(owner_user_id=request_owner_uid(request))
 
 
 @router.get("/{call_id}/recording/audio")
@@ -56,17 +63,19 @@ async def get_call_recording_audio(
 @router.get("/{call_id}", response_model=CallResponse)
 async def get_call(
     call_id: str,
+    request: Request,
     call_service: CallService = Depends(get_call_service),
 ) -> CallResponse:
-    return await call_service.get_call(call_id)
+    return await call_service.get_call(call_id, owner_user_id=request_owner_uid(request))
 
 
 @router.post("/individual", response_model=CallResponse)
 async def start_individual_call(
     payload: IndividualCallRequest,
+    request: Request,
     call_service: CallService = Depends(get_call_service),
 ) -> CallResponse:
-    return await call_service.start_individual_call(payload)
+    return await call_service.start_individual_call(payload, owner_user_id=request_owner_uid(request))
 
 
 @router.put("/{call_id}/status", response_model=CallResponse)
@@ -102,9 +111,10 @@ async def process_call_intelligence(
 @router.delete("/{call_id}", response_model=CallDeleteResponse)
 async def delete_call(
     call_id: str,
+    request: Request,
     call_service: CallService = Depends(get_call_service),
 ) -> CallDeleteResponse:
-    return await call_service.delete_call(call_id)
+    return await call_service.delete_call(call_id, owner_user_id=request_owner_uid(request))
 
 
 @router.post("/{call_id}/meeting-intent", response_model=MeetingConfirmationIntentResponse)

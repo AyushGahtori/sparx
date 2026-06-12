@@ -14,7 +14,11 @@ async function proxyRequest(request: Request, context: RouteContext) {
 
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
+  const authorization = request.headers.get("authorization");
   headers.set("Accept", request.headers.get("accept") || "application/json");
+  if (authorization) {
+    headers.set("Authorization", authorization);
+  }
 
   let body: BodyInit | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {

@@ -163,6 +163,7 @@ export type MeetingRecord = {
   meeting_id: string;
   title: string;
   attendee_name?: string | null;
+  attendee_phone?: string | null;
   attendee_email?: string | null;
   attendees: string[];
   scheduled_for: string;
@@ -173,9 +174,23 @@ export type MeetingRecord = {
   event_link?: string | null;
   meet_link?: string | null;
   description?: string | null;
+  notes?: string | null;
+  delivery_status?: string | null;
+  delivery_details?: Record<string, unknown>;
   call_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type MeetingCreatePayload = {
+  full_name: string;
+  phone: string;
+  email: string;
+  title: string;
+  description: string;
+  scheduled_for: string;
+  timezone: string;
+  notes?: string | null;
 };
 
 export type SummaryItem = {
@@ -261,16 +276,48 @@ export type PlatformRealtimeEvent = {
   emitted_at?: string;
 };
 
-export function platformEventStreamUrl() {
-  return `${apiConfig.baseUrl}/events/stream`;
+const PLATFORM_DATA_CACHE_TTL_MS = 15_000;
+let platformDataCache: { data: PlatformData; loadedAt: number } | null = null;
+let platformDataRequest: Promise<PlatformData> | null = null;
+
+export function platformEventStreamUrl(token?: string) {
+  const url = new URL(
+    `${apiConfig.baseUrl.replace(/\/$/, "")}/events/stream`,
+    typeof window === "undefined" ? "http://localhost:5501" : window.location.origin,
+  );
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
 }
 
-export async function loadPlatformData(): Promise<PlatformData> {
+export async function loadPlatformData(options: { force?: boolean } = {}): Promise<PlatformData> {
+  const now = Date.now();
+  if (!options.force && platformDataCache && now - platformDataCache.loadedAt < PLATFORM_DATA_CACHE_TTL_MS) {
+    return platformDataCache.data;
+  }
+  if (!options.force && platformDataRequest) {
+    return platformDataRequest;
+  }
+
+  platformDataRequest = fetchPlatformData();
+  try {
+    const data = await platformDataRequest;
+    if (!Object.keys(data.errors).length) {
+      platformDataCache = { data, loadedAt: Date.now() };
+    }
+    return data;
+  } finally {
+    platformDataRequest = null;
+  }
+}
+
+async function fetchPlatformData(): Promise<PlatformData> {
   const entries = await Promise.allSettled([
     backend.get<CallRecord[]>("/calls"),
     backend.get<Campaign[]>("/campaigns"),
     backend.get<CallbackRecord[]>("/callbacks"),
-    Promise.resolve([] as MeetingRecord[]),
+    backend.get<MeetingRecord[]>("/meetings?sync_google=false"),
     backend.get<SummaryItem[]>("/summaries"),
     backend.get<Agent[]>("/agents"),
     backend.get<ModuleStatus>("/twilio"),
@@ -326,6 +373,15 @@ export const services = {
   startCampaign(campaignId: string) {
     return backend.post<Campaign>(`/campaigns/${campaignId}/start`);
   },
+  pauseCampaign(campaignId: string) {
+    return backend.post<Campaign>(`/campaigns/${campaignId}/pause`);
+  },
+  resumeCampaign(campaignId: string) {
+    return backend.post<Campaign>(`/campaigns/${campaignId}/resume`);
+  },
+  stopCampaign(campaignId: string) {
+    return backend.post<Campaign>(`/campaigns/${campaignId}/stop`);
+  },
   executeCallback(callbackId: string) {
     return backend.post<CallbackRecord>(`/callbacks/${callbackId}/execute`);
   },
@@ -334,6 +390,9 @@ export const services = {
   },
   syncMeetings() {
     return backend.post<{ synced: number; meetings: MeetingRecord[] }>("/meetings/sync");
+  },
+  createMeeting(payload: MeetingCreatePayload) {
+    return backend.post<MeetingRecord>("/meetings", payload);
   },
   markMeetingDone(meetingId: string) {
     return backend.post<MeetingRecord>(`/meetings/${meetingId}/done`);

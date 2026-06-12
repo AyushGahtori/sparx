@@ -13,7 +13,6 @@ import {
   Grid2X2,
   Inbox,
   LogOut,
-  Moon,
   PhoneCall,
   RefreshCw,
   Settings2,
@@ -22,6 +21,7 @@ import {
   UploadCloud,
   UsersRound,
 } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/cn";
 
 const navItems = [
@@ -44,7 +44,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-[var(--sparx-canvas)] text-[var(--sparx-ink)]">
       <Sidebar />
-      <main className="min-w-0 flex-1 overflow-auto px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+      <main className="min-w-0 flex-1 overflow-auto px-4 py-4 sm:px-5 lg:px-6 lg:py-5">
         {children}
       </main>
     </div>
@@ -53,6 +53,7 @@ export function AppShell({ children }: AppShellProps) {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { logout, user } = useAuth();
 
   return (
     <aside className="sticky top-0 z-10 flex h-screen w-[64px] shrink-0 flex-col items-center border-r border-[var(--sparx-line)] bg-white px-2 py-4">
@@ -79,13 +80,12 @@ export function Sidebar() {
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-3">
-        <IconButton aria-label="Theme preview" title="Theme preview" variant="dark">
-          <Moon className="size-5 text-[var(--sparx-yellow)]" />
-        </IconButton>
-        <IconButton aria-label="Sign out" title="Sign out">
+        <IconButton aria-label="Sign out" onClick={() => void logout()} title="Sign out">
           <LogOut className="size-5" />
         </IconButton>
-        <div className="size-12 shrink-0 rounded-full border-2 border-white bg-[linear-gradient(135deg,#9bd8ff,#ffe3b0_48%,#f36d42)] shadow-sm" />
+        <div className="grid size-12 shrink-0 place-items-center rounded-full border-2 border-white bg-[linear-gradient(135deg,#9bd8ff,#ffe3b0_48%,#f36d42)] text-sm font-black text-white shadow-sm">
+          {(user?.displayName || user?.email || "A").slice(0, 1).toUpperCase()}
+        </div>
       </div>
     </aside>
   );
@@ -101,7 +101,7 @@ export function GreetingHeader({
   subtitle = "Let's take a look at your activity today.",
 }: GreetingHeaderProps) {
   return (
-    <header className="mb-5 border-b border-[var(--sparx-line)] pb-4">
+    <header className="mb-4 border-b border-[var(--sparx-line)] pb-3">
       <h1 className="text-[24px] font-black leading-tight tracking-normal sm:text-[32px]">
         Hi, {name} !
       </h1>
@@ -128,15 +128,15 @@ export function PageCanvas({
   className,
 }: PageCanvasProps) {
   return (
-    <section className={cn("min-w-0", className)}>
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <section className={cn("min-w-0 animate-[sparx-fade-up_280ms_ease-out_both]", className)}>
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           {eyebrow ? (
             <span className="text-xs font-black uppercase tracking-normal text-[var(--sparx-olive)]">
               {eyebrow}
             </span>
           ) : null}
-          <h2 className="mt-1 text-[34px] font-black leading-none tracking-normal text-black sm:text-[48px]">
+          <h2 className="mt-1 text-[32px] font-black leading-none tracking-normal text-black sm:text-[44px]">
             {title}
           </h2>
         </div>
@@ -171,7 +171,7 @@ export function StatCard({
   return (
     <article
       className={cn(
-        "grid min-h-[126px] content-between rounded-[8px] p-4",
+        "grid min-h-[116px] content-between rounded-[8px] p-4 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_14px_28px_rgba(44,38,27,0.08)]",
         toneClass,
       )}
     >
@@ -272,7 +272,7 @@ export function PrimaryButton({
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-black tracking-normal transition",
+        "inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-black tracking-normal transition duration-200 ease-out active:scale-[0.98] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
         variant === "solid"
           ? "bg-[var(--sparx-olive)] text-white shadow-[0_10px_22px_rgba(104,77,0,0.16)] hover:bg-[var(--sparx-olive-dark)]"
           : "bg-white text-[var(--sparx-olive)] ring-1 ring-[var(--sparx-line-strong)]",

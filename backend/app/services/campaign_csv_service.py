@@ -37,10 +37,6 @@ class CampaignCsvService:
         ".csv": "csv",
         ".xlsx": "xlsx",
         ".xls": "xls",
-        ".pdf": "pdf",
-        ".docx": "docx",
-        ".doc": "doc",
-        ".txt": "txt",
     }
     header_aliases = {
         "name": {
@@ -245,7 +241,7 @@ class CampaignCsvService:
         raise AppError(
             status_code=400,
             code="unsupported_lead_file_type",
-            message=f"Supported lead file types are: {supported}.",
+            message=f"Supported renewal sheet file types are: {supported}.",
         )
 
     def _extract_rows(

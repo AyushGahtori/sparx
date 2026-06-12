@@ -30,6 +30,10 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         authorization_header = request.headers.get("Authorization")
+        if not authorization_header and request.url.path == f"{self.settings.api_v1_prefix}/events/stream":
+            event_token = request.query_params.get("token")
+            if event_token:
+                authorization_header = f"Bearer {event_token}"
         path_is_public = self._is_public_path(request.url.path)
 
         if not self.settings.resolved_auth_required and not authorization_header:

@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     )
 
     firebase_credentials_path: str | None = Field(default=None, alias="FIREBASE_CREDENTIALS_PATH")
+    firebase_auth_project_id: str | None = Field(default=None, alias="FIREBASE_AUTH_PROJECT_ID")
     firebase_project_id: str | None = Field(default=None, alias="FIREBASE_PROJECT_ID")
     firebase_private_key: SecretStr | None = Field(default=None, alias="FIREBASE_PRIVATE_KEY")
     firebase_client_email: str | None = Field(default=None, alias="FIREBASE_CLIENT_EMAIL")
@@ -102,10 +103,13 @@ class Settings(BaseSettings):
     )
     google_oauth_token_file: str = Field(default=".google_oauth_token.json", alias="GOOGLE_OAUTH_TOKEN_FILE")
     google_oauth_token_dir: str = Field(default=".google_oauth_tokens", alias="GOOGLE_OAUTH_TOKEN_DIR")
+    google_oauth_token_json: SecretStr | None = Field(default=None, alias="GOOGLE_OAUTH_TOKEN_JSON")
     google_oauth_default_user_file: str = Field(
         default=".google_oauth_default_user.json",
         alias="GOOGLE_OAUTH_DEFAULT_USER_FILE",
     )
+    google_oauth_default_user_id: str | None = Field(default=None, alias="GOOGLE_OAUTH_DEFAULT_USER_ID")
+    google_oauth_default_user_email: str | None = Field(default=None, alias="GOOGLE_OAUTH_DEFAULT_USER_EMAIL")
     google_oauth_state_secret: SecretStr | None = Field(default=None, alias="GOOGLE_OAUTH_STATE_SECRET")
     frontend_settings_url: str = Field(default="http://127.0.0.1:5500/pages/settings.html", alias="FRONTEND_SETTINGS_URL")
     google_meeting_duration_minutes: int = Field(default=30, alias="GOOGLE_MEETING_DURATION_MINUTES")
@@ -129,6 +133,8 @@ class Settings(BaseSettings):
         self.deepgram_project_id = self._normalize_optional_string(self.deepgram_project_id)
         self.google_client_id = self._normalize_optional_string(self.google_client_id)
         self.google_redirect_uri = self._normalize_optional_string(self.google_redirect_uri)
+        self.google_oauth_default_user_id = self._normalize_optional_string(self.google_oauth_default_user_id)
+        self.google_oauth_default_user_email = self._normalize_optional_string(self.google_oauth_default_user_email)
         self.google_oauth_token_file = self.google_oauth_token_file.strip()
         self.google_oauth_token_dir = self.google_oauth_token_dir.strip()
         self.google_oauth_default_user_file = self.google_oauth_default_user_file.strip()
@@ -424,6 +430,12 @@ class Settings(BaseSettings):
         if self.google_client_secret_text:
             return self.google_client_secret_text
         return "local-dev-only-google-oauth-state"
+
+    @property
+    def google_oauth_token_json_text(self) -> str | None:
+        if self.google_oauth_token_json is None:
+            return None
+        return self.google_oauth_token_json.get_secret_value()
 
     @property
     def google_oauth_scopes(self) -> list[str]:

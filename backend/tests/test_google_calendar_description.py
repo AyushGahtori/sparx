@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -7,6 +8,7 @@ import httpx
 from app.config.settings import Settings
 from app.models.firestore_documents import CallDocument
 from app.services.google_calendar_service import GoogleCalendarService
+from app.services.google_oauth_token_store import GoogleOAuthTokenStore
 
 
 def build_call(summary: str | None = None) -> CallDocument:
@@ -83,3 +85,57 @@ def test_existing_calendar_event_description_is_cleared_from_customer_invite(mon
     assert result["description"] == ""
     assert patch_mock.call_args.kwargs["json"] == {"description": ""}
     assert patch_mock.call_args.kwargs["params"] == {"sendUpdates": "none"}
+
+
+def test_create_meet_event_sends_attendee_updates(monkeypatch):
+    service = GoogleCalendarService(Settings(), token_store=Mock())
+    credentials = SimpleNamespace(token="access-token")
+    meeting_details = service.build_meeting_details(build_call(summary=None))
+    created_event = {
+        "id": "event_123",
+        "htmlLink": "https://calendar.google.com/event",
+        "hangoutLink": "https://meet.google.com/abc-defg-hij",
+    }
+    post_mock = Mock(return_value=httpx.Response(200, json=created_event))
+    client_context = MagicMock()
+    client_context.__enter__.return_value = SimpleNamespace(post=post_mock)
+    monkeypatch.setattr(httpx, "Client", Mock(return_value=client_context))
+
+    result = service._create_meet_event(
+        credentials,
+        meeting_details,
+        extended_private_properties={"sparx_call_id": "call_description_test"},
+    )
+
+    assert result["id"] == "event_123"
+    assert post_mock.call_args.kwargs["params"] == {"conferenceDataVersion": "1", "sendUpdates": "all"}
+    assert post_mock.call_args.kwargs["json"]["attendees"] == [{"email": "2024270213.navin@pg.sharda.ac.in", "displayName": "Navin"}]
+
+
+def test_google_oauth_token_store_loads_env_credentials_for_default_user():
+    token_payload = {
+        "token": "access-token",
+        "refresh_token": "refresh-token",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "client-id",
+        "client_secret": "client-secret",
+        "expiry": "2099-01-01T00:00:00Z",
+        "scopes": ["https://www.googleapis.com/auth/calendar"],
+    }
+    settings = Settings(
+        GOOGLE_CLIENT_ID="client-id",
+        GOOGLE_CLIENT_SECRET="client-secret",
+        GOOGLE_REDIRECT_URI="https://example.com/api/auth/google/callback",
+        GOOGLE_OAUTH_TOKEN_JSON=json.dumps(token_payload),
+        GOOGLE_OAUTH_DEFAULT_USER_ID="operator-1",
+        GOOGLE_OAUTH_DEFAULT_USER_EMAIL="operator@example.com",
+    )
+    token_store = GoogleOAuthTokenStore(settings)
+
+    stored_credentials = token_store.load_credentials("operator-1")
+
+    assert stored_credentials is not None
+    assert stored_credentials.credentials.token == "access-token"
+    assert stored_credentials.owner_uid == "operator-1"
+    assert stored_credentials.owner_email == "operator@example.com"
+    assert token_store.load_credentials("other-operator") is not None

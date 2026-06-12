@@ -73,7 +73,7 @@ class CampaignService:
     async def preview_csv_upload(self, upload_file: UploadFile) -> CampaignCsvPreviewResponse:
         return await self.csv_service.preview_upload(upload_file)
 
-    async def create_campaign(self, payload: CampaignCreateRequest) -> CampaignResponse:
+    async def create_campaign(self, payload: CampaignCreateRequest, *, owner_user_id: str | None = None) -> CampaignResponse:
         agent = await self.agent_service.get_agent_configuration(payload.agent_id)
         schedule_at = coerce_utc(payload.scheduled_at) if payload.scheduled_at else utc_now()
         created_at = utc_now()
@@ -86,6 +86,7 @@ class CampaignService:
 
         campaign_document = CampaignDocument(
             id=campaign_id,
+            owner_user_id=owner_user_id,
             campaign_id=campaign_id,
             campaign_name=payload.campaign_name,
             agent_id=agent.agent_id,
@@ -117,6 +118,7 @@ class CampaignService:
             contacts.append(
                 CampaignContactDocument(
                     id=contact_id,
+                    owner_user_id=owner_user_id,
                     contact_id=contact_id,
                     campaign_id=campaign_id,
                     name=contact.name,
@@ -160,29 +162,29 @@ class CampaignService:
         self.runner_service.kick()
         return await self.get_campaign(campaign_id)
 
-    async def list_campaigns(self) -> list[CampaignResponse]:
-        campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns)
+    async def list_campaigns(self, *, owner_user_id: str | None = None) -> list[CampaignResponse]:
+        campaigns = await run_in_threadpool(self.campaign_repository.list_campaigns, owner_user_id=owner_user_id)
         return [self._to_response(campaign) for campaign in campaigns]
 
-    async def get_campaign(self, campaign_id: str) -> CampaignResponse:
-        campaign = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id)
+    async def get_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignResponse:
+        campaign = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return self._to_response(campaign)
 
-    async def get_campaign_contacts(self, campaign_id: str) -> list[CampaignContactResponse]:
-        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id)
+    async def get_campaign_contacts(self, campaign_id: str, *, owner_user_id: str | None = None) -> list[CampaignContactResponse]:
+        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return await self.sync_service.get_contacts(campaign_id)
 
-    async def get_campaign_data(self, campaign_id: str) -> CampaignDataResponse:
-        campaign_document = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id)
+    async def get_campaign_data(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignDataResponse:
+        campaign_document = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         contacts = await run_in_threadpool(self.contact_repository.list_contacts_by_campaign, campaign_id)
         campaign_calls = [
             call_document
-            for call_document in await run_in_threadpool(self.call_repository.list_calls)
+            for call_document in await run_in_threadpool(self.call_repository.list_calls, owner_user_id=owner_user_id)
             if call_document.campaign_id == campaign_id
         ]
         campaign_callbacks = [
             callback_document
-            for callback_document in await run_in_threadpool(self.callback_repository.list_callbacks)
+            for callback_document in await run_in_threadpool(self.callback_repository.list_callbacks, owner_user_id=owner_user_id)
             if callback_document.campaign_id == campaign_id
         ]
 
@@ -224,22 +226,26 @@ class CampaignService:
             timeline=timeline,
         )
 
-    async def start_campaign(self, campaign_id: str) -> CampaignResponse:
+    async def start_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignResponse:
         self._ensure_campaign_runtime_ready()
+        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return await self.runner_service.start_campaign(campaign_id)
 
-    async def pause_campaign(self, campaign_id: str) -> CampaignResponse:
+    async def pause_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignResponse:
+        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return await self.runner_service.pause_campaign(campaign_id)
 
-    async def resume_campaign(self, campaign_id: str) -> CampaignResponse:
+    async def resume_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignResponse:
         self._ensure_campaign_runtime_ready()
+        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return await self.runner_service.resume_campaign(campaign_id)
 
-    async def stop_campaign(self, campaign_id: str) -> CampaignResponse:
+    async def stop_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignResponse:
+        await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         return await self.runner_service.stop_campaign(campaign_id)
 
-    async def delete_campaign(self, campaign_id: str) -> CampaignDeleteResponse:
-        campaign = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id)
+    async def delete_campaign(self, campaign_id: str, *, owner_user_id: str | None = None) -> CampaignDeleteResponse:
+        campaign = await run_in_threadpool(self.campaign_repository.get_campaign, campaign_id, owner_user_id=owner_user_id)
         if campaign.status == "running":
             raise AppError(
                 status_code=409,

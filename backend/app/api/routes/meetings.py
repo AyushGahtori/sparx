@@ -6,6 +6,7 @@ from app.api.dependencies.auth import get_current_user
 from app.schemas.meeting import (
     MeetingCancelRequest,
     MeetingCancelResponse,
+    MeetingCreateRequest,
     MeetingDeleteResponse,
     MeetingResponse,
     MeetingRescheduleRequest,
@@ -34,6 +35,15 @@ async def list_meetings(
         sync_google=sync_google,
         operator_uid=current_user.uid,
     )
+
+
+@router.post("", response_model=MeetingResponse)
+async def create_meeting(
+    payload: MeetingCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    meeting_service: MeetingService = Depends(get_meeting_service),
+) -> MeetingResponse:
+    return await meeting_service.create_meeting(payload, operator_uid=current_user.uid)
 
 
 @router.post("/sync", response_model=MeetingSyncResponse)

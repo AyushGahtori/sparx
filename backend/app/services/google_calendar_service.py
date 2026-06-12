@@ -46,24 +46,96 @@ class GoogleCalendarService:
         existing_event = self._find_existing_meet_event(credentials, meeting_details)
         if existing_event is not None:
             existing_event = self._ensure_event_description_hidden(credentials, existing_event)
+            existing_event = self._notify_existing_event_attendees(credentials, existing_event, meeting_details)
             return {
                 **meeting_details,
                 "provider": "google",
                 "event_id": existing_event.get("id"),
                 "event_link": existing_event.get("htmlLink"),
                 "meet_link": self._extract_meet_link(existing_event),
+                "calendar_delivery": "attendee_updates_sent",
             }
+        event = self._create_meet_event(
+            credentials,
+            meeting_details,
+            extended_private_properties={"sparx_call_id": call_document.call_id},
+        )
+
+        return {
+            **meeting_details,
+            "provider": "google",
+            "event_id": event.get("id"),
+            "event_link": event.get("htmlLink"),
+            "meet_link": self._extract_meet_link(event),
+            "calendar_delivery": "attendee_updates_sent",
+        }
+
+    def create_scheduled_meeting(
+        self,
+        *,
+        title: str,
+        description: str,
+        attendee_name: str,
+        attendee_email: str,
+        attendee_phone: str,
+        scheduled_for: datetime,
+        ends_at: datetime,
+        timezone: str,
+        notes: str | None = None,
+        operator_uid: str | None = None,
+    ) -> dict[str, object]:
+        credentials = self._load_credentials(operator_uid=operator_uid)
+        meeting_details = self.build_scheduled_meeting_details(
+            title=title,
+            description=description,
+            attendee_name=attendee_name,
+            attendee_email=attendee_email,
+            attendee_phone=attendee_phone,
+            scheduled_for=scheduled_for,
+            ends_at=ends_at,
+            timezone=timezone,
+            notes=notes,
+        )
+        event = self._create_meet_event(
+            credentials,
+            meeting_details,
+            extended_private_properties={"sparx_source": "manual_scheduler"},
+        )
+        return {
+            **meeting_details,
+            "provider": "google",
+            "event_id": event.get("id"),
+            "event_link": event.get("htmlLink"),
+            "meet_link": self._extract_meet_link(event),
+            "calendar_delivery": "attendee_updates_sent",
+            "raw_event": event,
+        }
+
+    def _create_meet_event(
+        self,
+        credentials,
+        meeting_details: dict[str, object],
+        *,
+        extended_private_properties: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        attendee_email = str(meeting_details.get("attendee_email") or "").strip()
+        attendee_name = str(meeting_details.get("attendee_name") or "").strip()
+        attendee: dict[str, str] = {"email": attendee_email}
+        if attendee_name:
+            attendee["displayName"] = attendee_name
+
         event_body = {
             "summary": meeting_details["title"],
+            "description": meeting_details.get("description") or "",
             "start": {
                 "dateTime": meeting_details["scheduled_for"],
-                "timeZone": self.settings.callback_default_timezone,
+                "timeZone": meeting_details.get("timezone") or self.settings.callback_default_timezone,
             },
             "end": {
                 "dateTime": meeting_details["ends_at"],
-                "timeZone": self.settings.callback_default_timezone,
+                "timeZone": meeting_details.get("timezone") or self.settings.callback_default_timezone,
             },
-            "attendees": [{"email": call_document.email}],
+            "attendees": [attendee],
             "conferenceData": {
                 "createRequest": {
                     "requestId": f"sparx-{uuid4().hex}",
@@ -78,16 +150,14 @@ class GoogleCalendarService:
                 ],
             },
             "extendedProperties": {
-                "private": {
-                    "sparx_call_id": call_document.call_id,
-                },
+                "private": extended_private_properties or {},
             },
         }
 
         with httpx.Client(timeout=20) as client:
             response = client.post(
                 GOOGLE_CALENDAR_EVENTS_URL,
-                params={"conferenceDataVersion": "1", "sendUpdates": "none"},
+                params={"conferenceDataVersion": "1", "sendUpdates": "all"},
                 headers={"Authorization": f"Bearer {credentials.token}"},
                 json=event_body,
             )
@@ -100,14 +170,53 @@ class GoogleCalendarService:
                 details={"google_status": response.status_code, "google_response": response.text[:500]},
             )
 
-        event = response.json()
-        return {
-            **meeting_details,
-            "provider": "google",
-            "event_id": event.get("id"),
-            "event_link": event.get("htmlLink"),
-            "meet_link": self._extract_meet_link(event),
-        }
+        return response.json()
+
+    def _notify_existing_event_attendees(
+        self,
+        credentials,
+        event: dict[str, object],
+        meeting_details: dict[str, object],
+    ) -> dict[str, object]:
+        event_id = str(event.get("id") or "").strip()
+        if not event_id:
+            return event
+
+        attendee_email = str(meeting_details.get("attendee_email") or "").strip()
+        attendee_name = str(meeting_details.get("attendee_name") or "").strip()
+        attendee: dict[str, str] = {"email": attendee_email}
+        if attendee_name:
+            attendee["displayName"] = attendee_name
+
+        event_url = f"{GOOGLE_CALENDAR_EVENTS_URL}/{event_id}"
+        with httpx.Client(timeout=20) as client:
+            response = client.patch(
+                event_url,
+                params={"conferenceDataVersion": "1", "sendUpdates": "all"},
+                headers={"Authorization": f"Bearer {credentials.token}"},
+                json={
+                    "summary": meeting_details["title"],
+                    "description": meeting_details.get("description") or "",
+                    "start": {
+                        "dateTime": meeting_details["scheduled_for"],
+                        "timeZone": meeting_details.get("timezone") or self.settings.callback_default_timezone,
+                    },
+                    "end": {
+                        "dateTime": meeting_details["ends_at"],
+                        "timeZone": meeting_details.get("timezone") or self.settings.callback_default_timezone,
+                    },
+                    "attendees": [attendee],
+                },
+            )
+
+        if response.status_code >= 400:
+            raise AppError(
+                status_code=502,
+                code="google_calendar_notify_failed",
+                message="Google Calendar could not send attendee updates for the existing meeting.",
+                details={"google_status": response.status_code, "google_response": response.text[:500]},
+            )
+        return response.json()
 
     def _find_existing_meet_event(self, credentials, meeting_details: dict[str, object]) -> dict[str, object] | None:
         scheduled_for = datetime.fromisoformat(str(meeting_details["scheduled_for"]))
@@ -293,12 +402,57 @@ class GoogleCalendarService:
             "description": description,
             "timezone": self.settings.callback_default_timezone,
             "attendees": [call_document.email],
+            "attendee_name": call_document.lead_name,
             "attendee_email": call_document.email,
             "scheduled_for": meeting_start.isoformat(),
             "ends_at": meeting_end.isoformat(),
             "start_datetime": meeting_start.strftime("%B %d, %Y at %I:%M %p"),
             "end_datetime": meeting_end.strftime("%I:%M %p %Z"),
             "duration_minutes": self.settings.google_meeting_duration_minutes,
+        }
+
+    def build_scheduled_meeting_details(
+        self,
+        *,
+        title: str,
+        description: str,
+        attendee_name: str,
+        attendee_email: str,
+        attendee_phone: str,
+        scheduled_for: datetime,
+        ends_at: datetime,
+        timezone: str,
+        notes: str | None = None,
+    ) -> dict[str, object]:
+        target_timezone = ZoneInfo(timezone)
+        meeting_start = scheduled_for.astimezone(target_timezone)
+        meeting_end = ends_at.astimezone(target_timezone)
+        cleaned_description = " ".join(description.split()).strip()
+        cleaned_notes = " ".join((notes or "").split()).strip()
+        description_parts = [cleaned_description]
+        if cleaned_notes:
+            description_parts.append(f"Notes: {cleaned_notes}")
+        if attendee_phone:
+            description_parts.append(f"Participant phone: {attendee_phone}")
+
+        return {
+            "provider": "manual",
+            "event_id": None,
+            "event_link": None,
+            "meet_link": None,
+            "title": title,
+            "description": "\n\n".join(part for part in description_parts if part),
+            "timezone": timezone,
+            "attendees": [attendee_email],
+            "attendee_name": attendee_name,
+            "attendee_email": attendee_email,
+            "attendee_phone": attendee_phone,
+            "scheduled_for": meeting_start.isoformat(),
+            "ends_at": meeting_end.isoformat(),
+            "start_datetime": meeting_start.strftime("%B %d, %Y at %I:%M %p"),
+            "end_datetime": meeting_end.strftime("%I:%M %p %Z"),
+            "duration_minutes": int((meeting_end - meeting_start).total_seconds() // 60),
+            "notes": cleaned_notes or None,
         }
 
     def _load_credentials(self, *, operator_uid: str | None = None):
