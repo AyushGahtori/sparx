@@ -38,7 +38,7 @@ class MeetingRepository:
             if not should_use_mongo_fallback(exc):
                 raise
         self.mongo_fallback_service.upsert(self.collection_name, meeting_document.meeting_id, payload)
-        return self.get_meeting(meeting_document.meeting_id, owner_user_id=meeting_document.owner_user_id)
+        return meeting_document
 
     def get_meeting(self, meeting_id: str, *, owner_user_id: str | None = None) -> MeetingDocument:
         try:

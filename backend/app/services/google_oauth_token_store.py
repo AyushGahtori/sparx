@@ -50,6 +50,10 @@ class GoogleOAuthTokenStore:
         )
 
     def load_credentials(self, user_id: str | None = None) -> StoredGoogleCredentials | None:
+        env_credentials = self._load_credentials_from_env(user_id)
+        if env_credentials is not None:
+            return env_credentials
+
         for path, owner_uid, owner_email in self._candidate_paths(user_id):
             stored_credentials = self._load_credentials_from_path(
                 path,
@@ -82,6 +86,12 @@ class GoogleOAuthTokenStore:
         )
 
     def load_default_user(self) -> dict[str, str] | None:
+        if self.settings.google_oauth_default_user_id:
+            return {
+                "uid": self.settings.google_oauth_default_user_id,
+                "email": self.settings.google_oauth_default_user_email,
+            }
+
         path = self.settings.google_oauth_default_user_path
         if not path.exists():
             return None
@@ -121,6 +131,29 @@ class GoogleOAuthTokenStore:
 
         add(self.settings.google_oauth_token_path, None, None)
         return candidates
+
+    def _load_credentials_from_env(self, user_id: str | None) -> StoredGoogleCredentials | None:
+        token_json = self.settings.google_oauth_token_json_text
+        if not token_json:
+            return None
+
+        default_user = self.load_default_user()
+        owner_uid = default_user["uid"] if default_user else None
+        owner_email = default_user.get("email") if default_user else None
+
+        try:
+            info = json.loads(token_json)
+            credentials = Credentials.from_authorized_user_info(info, scopes=self.settings.google_oauth_scopes)
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(GoogleAuthRequest())
+            return StoredGoogleCredentials(
+                credentials=credentials,
+                path=Path("<GOOGLE_OAUTH_TOKEN_JSON>"),
+                owner_uid=owner_uid or user_id,
+                owner_email=owner_email,
+            )
+        except Exception:
+            return None
 
     def _load_credentials_from_path(
         self,

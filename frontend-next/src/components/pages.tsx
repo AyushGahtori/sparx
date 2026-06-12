@@ -2533,7 +2533,8 @@ function MeetingsCalendar({ meetings, onCreate }: { meetings: MeetingRecord[]; o
 
 export function MeetingsPage({ initialData }: PageDataProps) {
   const { data, status, error, refresh } = usePlatformData(initialData);
-  const meetings = data?.meetings ?? emptyMeetings;
+  const [syncedMeetings, setSyncedMeetings] = useState<MeetingRecord[] | null>(null);
+  const meetings = syncedMeetings ?? data?.meetings ?? emptyMeetings;
   const [message, setMessage] = useState("");
   const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
   const [isSchedulingClosing, setIsSchedulingClosing] = useState(false);
@@ -2545,6 +2546,17 @@ export function MeetingsPage({ initialData }: PageDataProps) {
       await action;
       setMessage(success);
       await refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Meeting action failed.");
+    }
+  }
+
+  async function handleSyncMeetings() {
+    setMessage("Updating meetings...");
+    try {
+      const result = await services.syncMeetings();
+      setSyncedMeetings(result.meetings);
+      setMessage("Calendar sync complete.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Meeting action failed.");
     }
@@ -2563,8 +2575,11 @@ export function MeetingsPage({ initialData }: PageDataProps) {
           ? "Meeting scheduled. Google Calendar sent the invite with the Google Meet link."
           : "Meeting scheduled, but the Google Meet link was not returned.",
       );
+      setSyncedMeetings((current) => {
+        const source = current ?? meetings;
+        return [createdMeeting, ...source.filter((meeting) => meeting.meeting_id !== createdMeeting.meeting_id)];
+      });
       closeSchedulingModal();
-      await refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to schedule meeting.");
     } finally {
@@ -2595,7 +2610,7 @@ export function MeetingsPage({ initialData }: PageDataProps) {
       <PageFrame>
         <PageCanvas
           title="Booked Meetings"
-          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void runAction(services.syncMeetings(), "Calendar sync complete.")}>Sync</PrimaryButton>}
+          actions={<PrimaryButton icon={<RefreshCw className="size-4" />} onClick={() => void handleSyncMeetings()}>Sync</PrimaryButton>}
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
           {message ? <p className="mt-2 text-sm font-bold text-[var(--sparx-muted)]">{message}</p> : null}
