@@ -71,3 +71,16 @@ def test_slow_cloudflare_tunnel_gets_extra_readiness_probe(monkeypatch):
     monkeypatch.setattr("app.services.public_tunnel_service.time.sleep", lambda _seconds: None)
 
     service.ensure_public_url_ready_for_call()
+
+
+def test_quick_tunnel_with_public_dns_passes_when_local_resolver_fails(monkeypatch):
+    settings = Settings(_env_file=None, PUBLIC_BASE_URL="https://dns-ok.trycloudflare.com")
+    service = PublicTunnelService(settings)
+
+    monkeypatch.setattr(service, "is_public_base_url_reachable", lambda: False)
+    monkeypatch.setattr(service, "_is_managed_tunnel_running", lambda: True)
+    monkeypatch.setattr(service, "_has_registered_tunnel_connection", lambda: True)
+    monkeypatch.setattr(service, "_is_local_origin_reachable", lambda: True)
+    monkeypatch.setattr(service, "_is_public_dns_resolvable", lambda _base_url: True)
+
+    service.ensure_public_url_ready_for_call()

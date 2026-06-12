@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import re
+import json
+import ssl
 import subprocess
 import time
 from functools import lru_cache
+from http.client import HTTPSConnection
+from urllib.parse import urlparse
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -61,7 +65,7 @@ class PublicTunnelService:
                     message="PUBLIC_BASE_URL must be configured so Twilio can reach the backend status webhooks and media stream bridge.",
                 )
 
-        if self.is_public_base_url_reachable():
+        if self.is_public_base_url_reachable() or self.is_quick_tunnel_ready_for_external_webhooks():
             return
 
         if self.settings.environment == "local" and self.settings.auto_public_tunnel_enabled and self.settings.uses_cloudflare_quick_tunnel:
@@ -77,10 +81,10 @@ class PublicTunnelService:
                     return
                 raise
 
-            if self.is_public_base_url_reachable():
+            if self.is_public_base_url_reachable() or self.is_quick_tunnel_ready_for_external_webhooks():
                 return
 
-        if not self.is_public_base_url_reachable():
+        if not self.is_public_base_url_reachable() and not self.is_quick_tunnel_ready_for_external_webhooks():
             raise AppError(
                 status_code=503,
                 code="public_base_url_unreachable",
@@ -105,13 +109,24 @@ class PublicTunnelService:
         except (OSError, URLError, TimeoutError, ValueError):
             return False
 
+    def is_quick_tunnel_ready_for_external_webhooks(self) -> bool:
+        base_url = self.settings.normalized_public_base_url
+        if not base_url or not self.settings.uses_cloudflare_quick_tunnel:
+            return False
+        return (
+            self._is_managed_tunnel_running()
+            and self._has_registered_tunnel_connection()
+            and self._is_local_origin_reachable()
+            and self._is_public_dns_resolvable(base_url)
+        )
+
     def _wait_until_public_base_url_reachable(self, timeout_seconds: int | float) -> bool:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
-            if self.is_public_base_url_reachable():
+            if self.is_public_base_url_reachable() or self.is_quick_tunnel_ready_for_external_webhooks():
                 return True
             time.sleep(0.5)
-        return self.is_public_base_url_reachable()
+        return self.is_public_base_url_reachable() or self.is_quick_tunnel_ready_for_external_webhooks()
 
     def _start_cloudflared_quick_tunnel(self, *, wait_until_reachable: bool) -> str:
         executable = self.settings.cloudflared_executable_file
@@ -168,7 +183,9 @@ class PublicTunnelService:
                     if not wait_until_reachable:
                         return tunnel_url
                     logger.info("Cloudflare quick tunnel URL detected, waiting for it to become reachable: %s", tunnel_url)
-            if tunnel_url and wait_until_reachable and self.is_public_base_url_reachable():
+            if tunnel_url and wait_until_reachable and (
+                self.is_public_base_url_reachable() or self.is_quick_tunnel_ready_for_external_webhooks()
+            ):
                 return tunnel_url
             time.sleep(0.5)
 
@@ -216,6 +233,61 @@ class PublicTunnelService:
             if path.exists():
                 chunks.append(path.read_text(encoding="utf-8", errors="ignore")[-5000:])
         return "\n".join(chunks)
+
+    def _has_registered_tunnel_connection(self) -> bool:
+        log_text = self._read_recent_tunnel_log().lower()
+        return "registered tunnel connection" in log_text
+
+    def _is_managed_tunnel_running(self) -> bool:
+        return bool(self.process and self.process.poll() is None)
+
+    def _is_local_origin_reachable(self) -> bool:
+        try:
+            request = Request(f"http://127.0.0.1:{self.settings.app_port}/", method="GET")
+            with urlopen(request, timeout=self.settings.public_tunnel_health_timeout_seconds) as response:
+                return 200 <= response.status < 300
+        except (OSError, URLError, TimeoutError, ValueError):
+            return False
+
+    def _is_public_dns_resolvable(self, base_url: str) -> bool:
+        host = urlparse(base_url).hostname
+        if not host:
+            return False
+        connection: HTTPSConnection | None = None
+        try:
+            connection = HTTPSConnection(
+                "cloudflare-dns.com",
+                timeout=self.settings.public_tunnel_health_timeout_seconds,
+                context=self._dns_probe_ssl_context(),
+            )
+            connection.request(
+                "GET",
+                f"/dns-query?name={host}&type=A",
+                headers={"accept": "application/dns-json"},
+            )
+            response = connection.getresponse()
+            if not 200 <= response.status < 300:
+                return False
+            payload = json.loads(response.read(4096).decode("utf-8", errors="ignore"))
+            answers = payload.get("Answer") or []
+            return any(str(answer.get("name", "")).rstrip(".").lower() == host.lower() for answer in answers)
+        except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
+            return False
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _dns_probe_ssl_context() -> ssl.SSLContext:
+        try:
+            import certifi
+
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            return ssl._create_unverified_context()
 
     def _stop_managed_process(self) -> None:
         if self.process and self.process.poll() is None:
