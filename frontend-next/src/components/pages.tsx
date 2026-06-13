@@ -570,11 +570,52 @@ export function DashboardPage({ initialData }: PageDataProps) {
           }
         >
           <DataNotice status={status} error={error} errors={data?.errors} />
-          <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Active Calls" value={activeCalls.length} caption="Real-time Sessions" icon={previewIcons.calls} />
-            <StatCard label="Transcripts" value={transcriptLines} caption="Live utterances" icon={previewIcons.transcript} />
-            <StatCard label="Contacts" value={contacts} caption="Ready to Dial" icon={<User className="size-4" />} />
-            <StatCard label="Meetings" value={meetingCount} caption="Booked Outcomes" icon={<CalendarCheck className="size-4" />} tone="olive" />
+          <section className="mt-5 grid min-h-[min(58vh,540px)] gap-5 sm:grid-cols-2">
+            <StatCard
+              label="Active Calls"
+              value={activeCalls.length}
+              caption="Real-time Sessions"
+              icon={previewIcons.calls}
+              className="min-h-[190px] p-5 sm:min-h-[220px] lg:min-h-[250px]"
+              captionClassName="text-base"
+              iconClassName="size-9"
+              labelClassName="text-lg"
+              valueClassName="text-[72px] sm:text-[86px]"
+            />
+            <StatCard
+              label="Transcripts"
+              value={transcriptLines}
+              caption="Live utterances"
+              icon={previewIcons.transcript}
+              className="min-h-[190px] p-5 sm:min-h-[220px] lg:min-h-[250px]"
+              captionClassName="text-base"
+              iconClassName="size-9"
+              labelClassName="text-lg"
+              valueClassName="text-[72px] sm:text-[86px]"
+            />
+            <StatCard
+              label="Contacts"
+              value={contacts}
+              caption="Ready to Dial"
+              icon={<User className="size-5" />}
+              className="min-h-[190px] p-5 sm:min-h-[220px] lg:min-h-[250px]"
+              captionClassName="text-base"
+              iconClassName="size-9"
+              labelClassName="text-lg"
+              valueClassName="text-[72px] sm:text-[86px]"
+            />
+            <StatCard
+              label="Meetings"
+              value={meetingCount}
+              caption="Booked Outcomes"
+              icon={<CalendarCheck className="size-5" />}
+              tone="olive"
+              className="min-h-[190px] p-5 sm:min-h-[220px] lg:min-h-[250px]"
+              captionClassName="text-base"
+              iconClassName="size-9"
+              labelClassName="text-lg"
+              valueClassName="text-[72px] sm:text-[86px]"
+            />
           </section>
         </PageCanvas>
       </PageFrame>

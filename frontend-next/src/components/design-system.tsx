@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import {
@@ -57,8 +58,15 @@ export function Sidebar() {
 
   return (
     <aside className="sticky top-0 z-10 flex h-screen w-[64px] shrink-0 flex-col items-center border-r border-[var(--sparx-line)] bg-white px-2 py-4">
-      <div className="grid size-11 shrink-0 place-items-center rounded-[8px] bg-[var(--sparx-brand-soft)] text-white shadow-sm">
-        <Sparkles className="size-7" strokeWidth={2.6} />
+      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-[var(--sparx-brand-soft)] shadow-sm">
+        <Image
+          src="/sparx-assets/sparx-logo.svg"
+          alt="Sparx"
+          width={44}
+          height={44}
+          priority
+          className="size-full object-cover"
+        />
       </div>
 
       <nav className="mt-6 flex flex-col items-center gap-2" aria-label="Primary">
@@ -153,6 +161,11 @@ type StatCardProps = {
   caption?: string;
   tone?: "warm" | "olive" | "white";
   icon?: ReactNode;
+  className?: string;
+  captionClassName?: string;
+  iconClassName?: string;
+  labelClassName?: string;
+  valueClassName?: string;
 };
 
 export function StatCard({
@@ -161,6 +174,11 @@ export function StatCard({
   caption,
   tone = "warm",
   icon,
+  className,
+  captionClassName,
+  iconClassName,
+  labelClassName,
+  valueClassName,
 }: StatCardProps) {
   const toneClass = {
     warm: "bg-[var(--sparx-card)] text-[var(--sparx-ink)]",
@@ -173,22 +191,23 @@ export function StatCard({
       className={cn(
         "grid min-h-[116px] content-between rounded-[8px] p-4 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_14px_28px_rgba(44,38,27,0.08)]",
         toneClass,
+        className,
       )}
     >
       <div className="flex items-center gap-2">
         {icon ? (
-          <span className="grid size-7 place-items-center rounded-full border border-current/35">
+          <span className={cn("grid size-7 place-items-center rounded-full border border-current/35", iconClassName)}>
             {icon}
           </span>
         ) : null}
-        <span className="text-sm font-black leading-tight">{label}</span>
+        <span className={cn("text-sm font-black leading-tight", labelClassName)}>{label}</span>
       </div>
       <div>
-        <strong className="block text-[48px] font-black leading-[0.88] tracking-normal sm:text-[56px]">
+        <strong className={cn("block text-[48px] font-black leading-[0.88] tracking-normal sm:text-[56px]", valueClassName)}>
           {value}
         </strong>
         {caption ? (
-          <span className="mt-2 block text-sm font-medium opacity-80">
+          <span className={cn("mt-2 block text-sm font-medium opacity-80", captionClassName)}>
             {caption}
           </span>
         ) : null}

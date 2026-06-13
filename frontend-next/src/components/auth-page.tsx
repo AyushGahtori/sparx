@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { Lock, Mail, Sparkles, User } from "lucide-react";
+import { Lock, Mail, User } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebase";
 
@@ -117,8 +117,15 @@ export function AuthPage({ mode }: AuthPageProps) {
     <main className="min-h-screen bg-[var(--sparx-page)] p-3 sm:p-6">
       <section className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-5 rounded-[28px] bg-white p-5 shadow-[0_22px_80px_rgba(40,32,20,0.08)] lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] lg:p-9">
         <article className="grid content-center rounded-[24px] border border-[var(--sparx-line)] bg-[var(--sparx-panel)] px-6 py-10 text-center">
-          <div className="mx-auto grid size-16 place-items-center rounded-[8px] bg-[var(--sparx-brand-soft)] text-white shadow-sm">
-            <Sparkles className="size-10" strokeWidth={3} />
+          <div className="mx-auto grid size-16 place-items-center overflow-hidden rounded-[8px] bg-[var(--sparx-brand-soft)] shadow-sm">
+            <Image
+              src="/sparx-assets/sparx-logo.svg"
+              alt="Sparx"
+              width={64}
+              height={64}
+              priority
+              className="size-full object-cover"
+            />
           </div>
           <p className="mt-3 text-xs font-black text-[var(--sparx-muted)]">Manage your calls</p>
           <h1 className="mt-8 text-[34px] font-black leading-none text-black">{isSignup ? "Sign Up" : "Log In"}</h1>
