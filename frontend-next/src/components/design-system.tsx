@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import {
@@ -57,8 +58,15 @@ export function Sidebar() {
 
   return (
     <aside className="sticky top-0 z-10 flex h-screen w-[64px] shrink-0 flex-col items-center border-r border-[var(--sparx-line)] bg-white px-2 py-4">
-      <div className="grid size-11 shrink-0 place-items-center rounded-[8px] bg-[var(--sparx-brand-soft)] text-white shadow-sm">
-        <Sparkles className="size-7" strokeWidth={2.6} />
+      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-[var(--sparx-brand-soft)] shadow-sm">
+        <Image
+          src="/sparx-assets/sparx-logo.svg"
+          alt="Sparx"
+          width={44}
+          height={44}
+          priority
+          className="size-full object-cover"
+        />
       </div>
 
       <nav className="mt-6 flex flex-col items-center gap-2" aria-label="Primary">
